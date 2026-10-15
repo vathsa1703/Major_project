@@ -1,0 +1,61 @@
+# CLAUDE.md — UAV-NOMA Disaster Network Planning Simulator
+
+Read at the start of every session. Update "Current state" when a phase or gate moves.
+(The Maieutic LMS CLAUDE.md that may be loaded from Downloads is a different project. Ignore it here.)
+
+## What we're building
+A **simulation-based planning tool** for UAV base stations in disaster areas (ground towers down, survivors in moving clusters, battery-limited UAV, NOMA downlink). Never say "digital twin" without the qualifier ("digital-twin-style" only with state sync / trace replay).
+Research question: can a crowd-aware RL controller adapt UAV position, altitude and power to shifting demand better than static and heuristic strategies under a battery limit?
+Origin: the guide asked for a moving base station using NOMA; the team extended it with crowds, obstacles, energy and RL. NOMA must stay visible in every result.
+
+## Hypotheses (every experiment serves one)
+- H1: adaptive control beats a fixed UAV once crowds move.
+- H2: RL beats strong heuristics (k-means B2, grid search B3, PSO B4) only under dynamics + battery limits. Report the regime boundary, including losses. Never compare RL against B0 alone.
+- H3: NOMA beats OMA at equal bandwidth and power.
+- H4: coordinated multi-UAV control beats independent/centroid placement (stretch).
+
+## Build order and gates (do not start the next layer until the gate passes)
+Simulator -> baselines -> RL -> multi-UAV. G1 simulator core (MATLAB parity, tests green) · G2 physics (altitude optimum, energy and NOMA-feasibility tests) · G3 baselines on 100+ seeds · G4 PPO beats random and matches B2 on static · G5 dynamic RL, 5 seeds · G6 multi-UAV · G7 feature freeze at M10.
+Tiers: MVP (1 UAV, 3 moving clusters, LoS/NLoS, NOMA pairs, battery, baselines, plots) must ship; Target adds obstacles, evacuation, PPO/SAC, API, dashboard; Stretch is multi-UAV/MAPPO etc.
+
+## Current state
+Phases (our own breakdown, mapped to PROJECT_PLAN months): 1 validate the slice · 2 configurable scenarios · 3 time + mobility · 4 obstacles + fading · 5 energy + battery + Gymnasium env: all built. NEXT: baselines B0-B5 (Gate G3), then PPO. Still open from G1/G2: MATLAB parity and paper-checking every parameter.
+Only `uav_dataset/` exists: a single-UAV dataset generator + Gymnasium env (`uav_env.py`) + demo viewer (`view_run.py`). No baselines or RL yet. The first dataset version is kept in `uav_dataset/data_v1/`.
+- Phase 4+5 (built, 52 tests pass: `test_noma.py`, `test_mobility.py`, `test_phase45.py`, `test_env.py`): collapsed-building rectangles (0-5 per scenario, 15 dB excess loss on a crossed link = engineering assumption; 2D only, users inside a rectangle count as blocked); optional Rician/Rayleigh fading (off in the dataset, per-env toggle); Zeng-Xu-Zhang propulsion + climb + comm (P_tx/0.4) + 5 W circuit; 10 Wh battery (~3.5 min hover, so it binds in a 300 s episode); UAV limits 15 m/s, 50-300 m; two harder mobility models (`hotspot_jump`, `surge`, 3 m/s). `UAVEnv`: obs 211 floats (11 scalars + two 10x10 heatmaps, all users and rescue users), action [vx,vy,vz,power] in [-1,1], reward v1 coverage / v2 minus lambda_E x energy, battery-empty terminates with penalty. Env and dataset share one physics code path (`make_dataset.py`).
+- H1 re-check at 10 dBm with obstacles and harder crowds (`python mobility_check.py 30 10`, 30 scenarios, only 3-9 per mobility model so noisy): oracle-best minus fixed centre drone = surge 0.23, attraction 0.14, random_waypoint 0.06, group_drift 0.06, hotspot_jump 0.04 coverage (max gap at one snapshot: surge 0.75). Dynamics now matter, mostly for sudden events. The oracle is an upper bound, not a controller.
+- Phase 2 (dataset v2): each seed draws its own n_users (100/300/600/1000), clusters (2-5), radius (50-200 m), scatter share; 5 classes (rescue/video/voice/iot/normal, spec's mix); bandwidth = n_users x 50 kHz; pairing `extreme` or `random`; `sic_feasible` is its own function. Outputs: `scenarios_*`, `users_*`, `sweep_*` CSVs (sweep 813,120 rows, altitudes 50-1000 m) and `uav_noma_dataset.xlsx` (sheets scenarios/users/sweep, `split` column).
+- Checked: altitude optimum exists per class (`altitude_by_class.py`): iot ~500 m, voice 200-600 m, normal 100-400 m, rescue 50-200 m, video 50 m (higher rate target -> lower best altitude; altitudes above 500 m are diagnostic only, plan h_max is 300-500 m). NOMA/OMA sum-rate ratio ~0.80 / 1.01 / 1.14 / 1.17 at 0/10/20/30 dBm (OMA wins at 0 dBm, plausible low-SNR physics, not proven). 9 pytest tests pass.
+- Phase 3 (done): `simulate()` moves users 300 s (1 s steps, snapshot every 30 s) with a per-scenario model: random_waypoint, group_drift or attraction (speeds 0.5-1.5 m/s, engineering assumptions). New `trajectory_*.csv` (823,900 rows) and Excel sheet `trajectory`; the xlsx is ~147 MB. 20 tests pass (`test_noma.py`, `test_mobility.py`). Not done: evacuation model, `demand` field, time in the sweep (sweep is t=0 positions only).
+- H1 check (`mobility_check.py`, 15 scenarios, fixed drone at centre, 200 m, 20 dBm): a fixed drone already covers 79-89% and the oracle-best position adds only 1-6 points, so crowd movement barely matters in this setup. Dynamics are too weak/benign for H1/H2; Phase 4-5 scenarios must be harder (lower power, bigger area, surges, hotspot jumps, battery) before RL is worth testing.
+- Per-class min rates are ENGINEERING ASSUMPTIONS and not signed off by the team. At 0 dBm video (500 kbps) coverage is ~0. Decide before any result goes in a report.
+- Open decisions: battery size/episode length and UAV limits were chosen by the user (10 Wh, 300 s, 15 m/s, 50-300 m) but are still assumptions; evacuation (social-force) model and `demand` field not built; Excel export fails with PermissionError if the xlsx is open in Excel (close it first).
+- NOT done: MATLAB parity (G1); verify Al-Hourani a, b, eta and hover power P0+Pi against the papers; k-means / QoS-aware pairing, optimized power split, imperfect SIC (a real SIC failure only appears there, since roles are set by gain), BER.
+- Known gaps: `energy_j_per_step` is constant hover power (168.5 J); `sweep_one` loops in Python over drone positions; no `demand` field per user yet.
+
+## Dataset generator (`uav_dataset/`)
+    python make_dataset.py users|sweep|all|quick   # all takes ~1 min
+    python export_excel.py                         # CSVs -> one Excel file
+    python altitude_by_class.py [n]                # Gate G2 diagnostic
+    python -m pytest test_noma.py
+Change settings only in `config.yaml` (one config per dataset version). Splits by seed, never mixed: train 0-99, val 100-119, test 120-139.
+- scenarios table: seed, n_users, n_clusters, cluster_radius_m, scatter_fraction, area_m, bandwidth_hz, pairing.
+- users table (t=0 snapshot): seed, user_id, x, y, cluster_id (-1 scattered), class, min_rate_bps.
+- sweep table: seed, x, y, h, p_dbm, pairing, coverage, sum_rate_mbps, spectral_eff, fairness, outage_rescue, coverage_oma, sum_rate_oma_mbps, energy_j_per_step.
+- Model: mean path loss = FSPL + P_LoS*eta_LoS + (1-P_LoS)*eta_NLoS; NOMA pairs strongest with weakest (or random), fixed 0.8/0.2 split, SIC feasibility checked; OMA = FDMA with the same total bandwidth and power; total power and bandwidth shared by all users; no fading/obstacles.
+- Excel sheets hold at most ~1,048,575 rows; `export_excel.py` fails loudly above that.
+
+## Conventions (non-negotiable)
+- Vectorized NumPy, no Python loops over users in the hot path, seeded RNG only, config-driven (no magic numbers in code).
+- Everything below the Gymnasium env is pure Python/NumPy with no UI or RL dependency. Baselines, RL and the API all call the same `env.step()`.
+- Every physical parameter needs value, unit, source (paper) or "engineering assumption", and a sensitivity range. Take Al-Hourani and Zeng-Xu-Zhang values from the papers and cite them. Do not invent.
+- Results only from committed configs + seeds. RL: at least 5 seeds, mean +/- 95% CI, paired comparisons, report negative results.
+- Tests required for physics changes. Parity tests must stay green once they exist.
+
+## Working agreements
+- Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
+- After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
+- Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.
+- Dashboard/API is a parallel track and never blocks the research.
+
+## Environment
+Windows 11, PowerShell/Git Bash, Python with numpy, pandas, matplotlib, pyyaml, pytest, xlsxwriter. Not a git repo.

@@ -1,0 +1,106 @@
+# UAV-NOMA dataset config. Every dataset version = this file + the seeds below.
+# Change values HERE, never inside the code.
+
+area_m: 1000            # square side
+
+# Each scenario (seed) draws its own values from these ranges (domain randomization).
+n_users_choices: [100, 300, 600, 1000]   # must be even (NOMA pairs)
+n_clusters_range: [2, 5]                 # inclusive
+cluster_radius_range_m: [50, 200]
+scatter_fraction_range: [0.05, 0.10]     # isolated users spread over the whole area
+
+# user classes: share of users and minimum rate to count as "covered" (bits/s).
+# Class mix is from the project spec example; the min rates are ENGINEERING ASSUMPTIONS
+# (no source yet) - give each a sensitivity range before using results in the report.
+classes:
+  rescue: {share: 0.10, min_rate_bps: 200000}
+  video:  {share: 0.20, min_rate_bps: 500000}
+  voice:  {share: 0.30, min_rate_bps: 50000}
+  iot:    {share: 0.20, min_rate_bps: 10000}
+  normal: {share: 0.20, min_rate_bps: 100000}
+
+# seeds: separate lists so train / validation / test never overlap
+seeds_train: [0, 99]            # inclusive range -> 100 scenarios
+seeds_val:   [100, 119]         # 20 scenarios
+seeds_test:  [120, 139]         # 20 scenarios
+
+# mobility (Phase 3). Each scenario draws one model; all speeds are walking speeds (engineering assumptions).
+mobility:
+  dt_s: 1.0
+  episode_steps: 300            # 300 s of movement
+  store_every_steps: 30         # trajectory snapshot every 30 s -> 11 snapshots per scenario
+  choices: [random_waypoint, group_drift, attraction, hotspot_jump, surge]
+  speed_mps: [0.5, 1.5]
+  group_jitter_mps: 0.3         # group_drift: per-user random wobble around the group
+  n_shelters_range: [1, 2]      # attraction: users walk to the nearest shelter
+  arrival_radius_m: 20          # attraction: users stop within this radius of the shelter
+  # harder dynamics (engineering assumptions): sudden events that a fixed drone handles badly
+  surge_speed_mps: 3.0          # surge / hotspot_jump: panicked fast walking or running
+  surge_start_range_s: [60, 180]  # when the sudden event starts (users are still before that)
+  surge_radius_m: 60            # surge: users pile up within this radius of the new point
+
+# radio
+fc_hz: 2000000000
+bandwidth_per_user_hz: 50000    # total bandwidth = n_users x this (200 users -> 10 MHz); keeps per-user rates comparable
+noise_density_dbm_hz: -174
+noise_figure_db: 7
+tx_power_dbm_levels: [0, 10, 20, 30]   # TOTAL power, shared by all users
+
+# air-to-ground channel, urban (Al-Hourani et al.) - VERIFY against the paper
+a2g:
+  a: 9.61
+  b: 0.16
+  eta_los_db: 1.0
+  eta_nlos_db: 20.0
+
+# obstacles = collapsed-building rectangles (Phase 4). A drone-user link that crosses one gets extra loss.
+obstacles:
+  n_range: [0, 5]               # inclusive; drawn per scenario
+  size_range_m: [40, 150]       # width and height of each rectangle
+  excess_loss_db: 15.0          # ENGINEERING ASSUMPTION: extra loss on a blocked link (sensitivity range 10-25)
+
+# small-scale fading (Phase 4). Off = average channel (deterministic baselines, dataset sweep).
+fading:
+  enabled: false
+  rician_k_db: 10.0             # ENGINEERING ASSUMPTION: LoS link K-factor; NLoS links use Rayleigh
+
+# NOMA
+noma_alpha_weak: 0.8            # power share of the weak user (strong gets 0.2)
+pairing: extreme                # extreme (strongest with weakest) | random
+
+# sweep of drone positions
+sweep:
+  xy_step_m: 100                # 11 x 11 grid on 1000 m (use 50 for a finer 21 x 21)
+  altitudes_m: [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 1000]  # plan's h_max is 300-500 m; above that is diagnostic only
+
+# energy: rotary-wing propulsion (Zeng, Xu, Zhang) - VERIFY every value against the paper before citing
+energy:
+  dt_s: 1.0
+  P0_w: 79.86                   # blade profile power in hover
+  Pi_w: 88.63                   # induced power in hover  (hover = P0 + Pi = 168.49 W)
+  Utip_mps: 120.0               # rotor tip speed
+  v0_mps: 4.03                  # mean rotor induced velocity in hover
+  d0: 0.6                       # fuselage drag ratio
+  rho_kg_m3: 1.225              # air density
+  s: 0.05                       # rotor solidity
+  A_m2: 0.503                   # rotor disc area
+  weight_n: 20.0                # UAV weight (Zeng's value); used for the climbing term
+  P_circuit_w: 5.0              # ENGINEERING ASSUMPTION: on-board electronics
+  pa_efficiency: 0.4            # ENGINEERING ASSUMPTION: power-amplifier efficiency, comm power = P_tx / this
+  battery_wh: 10.0              # small on purpose: ~3.5 min of hover, so the battery binds in a 300 s episode
+
+# UAV limits (spec values; engineering assumptions)
+uav:
+  v_max_mps: 15.0               # max horizontal speed
+  vz_max_mps: 5.0               # max vertical speed
+  h_min_m: 50.0
+  h_max_m: 300.0                # the sweep goes above this for diagnostics only
+  start_h_m: 150.0
+  p_max_dbm: 30.0
+
+# Gymnasium env (Phase 5)
+env:
+  grid: 10                      # NxN user-density heatmap
+  reward: v2                    # v1 = coverage;  v2 = coverage - lambda_E * (energy_step / hover_energy_step)
+  lambda_energy: 0.05           # ENGINEERING ASSUMPTION
+  terminal_penalty: 1.0         # battery empty: reward -= penalty * share of users left uncovered
