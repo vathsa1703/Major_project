@@ -78,8 +78,11 @@ def test_fading_has_unit_mean_power(monkeypatch):
     g = md.channel_gain(ux, uy, X, Y, H, rng=np.random.default_rng(0))[0]
     d = 300.0
     fspl = 20 * np.log10(4 * np.pi * md.CFG["fc_hz"] * d / md.C)
-    p_los = 1 / (1 + md.CFG["a2g"]["a"] * np.exp(-md.CFG["a2g"]["b"] * (90 - md.CFG["a2g"]["a"])))
-    expect = p_los * 10 ** (-(fspl + md.CFG["a2g"]["eta_los_db"]) / 10) + (1 - p_los) * 10 ** (-(fspl + md.CFG["a2g"]["eta_nlos_db"]) / 10)
+    a2g = md.CFG["a2g"]
+    p_los = 1 / (1 + a2g["a"] * np.exp(-a2g["b"] * (90 - a2g["a"])))
+    los_gain = 10 ** (-(fspl + a2g["eta_los_db"]) / 10)
+    nlos_gain = 10 ** (-(fspl + a2g["eta_nlos_db"]) / 10)
+    expect = p_los * los_gain + (1 - p_los) * nlos_gain
     assert g.mean() == pytest.approx(expect, rel=0.1)
 
 

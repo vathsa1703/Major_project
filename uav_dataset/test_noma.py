@@ -1,6 +1,5 @@
 """Sanity tests for the NOMA / channel code in make_dataset.py. Run: python -m pytest test_noma.py"""
 import numpy as np
-import pytest
 
 import make_dataset as md
 
@@ -23,7 +22,7 @@ def test_gain_falls_with_horizontal_distance():
 def test_sum_rate_rises_with_power():
     g = _gains()
     rates = [md.noma_rates(g, 10 ** ((p - 30) / 10), N0)[0].sum() for p in [0, 10, 20, 30]]
-    assert all(b > a for a, b in zip(rates, rates[1:]))
+    assert all(b > a for a, b in zip(rates, rates[1:], strict=False))
 
 
 def test_more_power_to_weak_user_lowers_strong_rate():

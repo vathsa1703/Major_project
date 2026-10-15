@@ -52,7 +52,6 @@ def test_sudden_events_start_calm_then_move_fast(model):
 
 def test_attraction_moves_users_closer_together():
     _, _, tr = _run("attraction")
-    spread = lambda d: np.hypot(d.x - d.x.mean(), d.y - d.y.mean()).mean()
     # users walk to 1-2 shelters, so by the end they are packed into at most 2 small blobs
     first, last = tr[tr.t == 0], tr[tr.t == tr.t.max()]
     assert last.groupby(last.x.round(-2)).ngroups <= first.groupby(first.x.round(-2)).ngroups

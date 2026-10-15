@@ -38,7 +38,7 @@ print("\nbest altitude per (power, class):")
 print(m.idxmax(axis=1).unstack("class").to_string())
 
 fig, ax = plt.subplots(1, len(POWERS), figsize=(11, 4), sharey=True)
-for a, p in zip(ax, POWERS):
+for a, p in zip(ax, POWERS, strict=True):
     for c, row in m.loc[p].iterrows():
         a.plot(row.index, row.values, "-o", label=f"{c} ({md.CFG['classes'][c]['min_rate_bps']/1e3:.0f} kbps)")
     a.set_title(f"{p} dBm, NOMA"); a.set_xlabel("altitude (m)")

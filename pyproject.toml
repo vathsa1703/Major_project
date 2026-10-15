@@ -1,0 +1,24 @@
+[project]
+name = "uavsim"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 120
+exclude = ["uav_dataset/data", "uav_dataset/data_v1"]
+src = ["uav_dataset"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B"]          # errors, pyflakes, whitespace, import order, bugbear
+ignore = ["E741", "E702", "E731"]   # l/I names, `a; b` and short lambdas are normal in the math code
+
+[tool.pytest.ini_options]
+testpaths = ["uav_dataset"]
+pythonpath = ["uav_dataset"]
+
+[tool.coverage.run]
+include = ["uav_dataset/make_dataset.py", "uav_dataset/uav_env.py"]   # physics + env; scripts are not counted
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

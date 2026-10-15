@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -47,7 +48,8 @@ def make_scenario(seed):
         "area_m": CFG["area_m"],
         "bandwidth_hz": n * CFG["bandwidth_per_user_hz"],
         "pairing": CFG["pairing"],
-        "mobility": str(rng.choice(CFG["mobility"]["choices"])),   # drawn after the basics, so earlier draws are unchanged
+        # drawn after the basics, so the earlier draws are unchanged
+        "mobility": str(rng.choice(CFG["mobility"]["choices"])),
         "n_obstacles": int(rng.integers(CFG["obstacles"]["n_range"][0], CFG["obstacles"]["n_range"][1] + 1)),
     }
 
@@ -237,7 +239,8 @@ def channel_gain(ux, uy, X, Y, H, boxes=None, rng=None, fading=None):
     X,Y,H are arrays of shape (P,). Returns (P, N).
     Mean path loss = FSPL + P_LoS*eta_LoS + (1-P_LoS)*eta_NLoS (Al-Hourani).
     boxes: (M,4) obstacle rectangles; a blocked link gets obstacles.excess_loss_db extra loss.
-    rng + fading: if rng is given AND fading is on (default: config fading.enabled), each link is drawn LoS/NLoS and gets Rician (LoS) / Rayleigh (NLoS) fading
+    rng + fading: if rng is given AND fading is on (default: config fading.enabled), each link is drawn
+    LoS/NLoS and gets Rician (LoS) / Rayleigh (NLoS) fading
     (unit mean power) instead of the average path loss."""
     a2g = CFG["a2g"]
     dx = ux[None, :] - X[:, None]
@@ -378,13 +381,14 @@ def run_users():
               f"trajectory_{split}.csv  {len(tr)} rows")
     # preview picture: 4 scenarios
     fig, ax = plt.subplots(1, 4, figsize=(16, 4))
-    for a, s in zip(ax, seeds("train")[:4]):
+    for a, s in zip(ax, seeds("train")[:4], strict=True):
         sc = make_scenario(s); u = make_users(s, sc)
         for cid, g in u.groupby("cluster_id"):
             a.scatter(g.x, g.y, s=8, label="scatter" if cid == -1 else f"cluster {cid}")
         r = u[u["class"] == "rescue"]
         a.scatter(r.x, r.y, s=30, facecolors="none", edgecolors="k", label="rescue")
-        a.set_title(f"seed {s}: {sc['n_users']} users, {sc['n_clusters']} clusters"); a.set_xlim(0, CFG["area_m"]); a.set_ylim(0, CFG["area_m"]); a.set_aspect("equal")
+        a.set_title(f"seed {s}: {sc['n_users']} users, {sc['n_clusters']} clusters")
+        a.set_xlim(0, CFG["area_m"]); a.set_ylim(0, CFG["area_m"]); a.set_aspect("equal")
     ax[0].legend(fontsize=7)
     plt.tight_layout(); plt.savefig(OUT / "users_preview.png", dpi=110)
     print("saved users_preview.png")
