@@ -16,22 +16,32 @@ gx = np.arange(0, md.CFG["area_m"] + 1, md.CFG["sweep"]["xy_step_m"])
 GX, GY = [a.ravel() for a in np.meshgrid(gx, gx, indexing="ij")]
 centre = md.CFG["area_m"] / 2
 
+
+def coverage(X, Y, ux, uy, sc, rng, minr, boxes):
+    """NOMA coverage for a drone at each (X, Y) (all at height H)."""
+    gains = md.channel_gain(ux, uy, X, Y, np.full(len(X), H), boxes)
+    return np.array([
+        (md.noma_rates(g, pw, noise, sc["bandwidth_hz"], sc["pairing"], rng)[0] >= minr).mean() for g in gains])
+
+
 rows = []
 for s in md.seeds("train")[:N_SC]:
-    sc = md.make_scenario(s); u = md.make_users(s, sc); tr = md.simulate(s, sc, u)
+    sc = md.make_scenario(s)
+    u = md.make_users(s, sc)
+    tr = md.simulate(s, sc, u)
     boxes = md.obstacle_array(md.make_obstacles(s, sc))
     rng = np.random.default_rng([s, 2])
     minr = u["min_rate_bps"].values
     for t, d in tr.groupby("t"):
         d = d.sort_values("user_id")
-        ux, uy = d.x.values, d.y.values
-        cov = lambda X, Y: np.array([(md.noma_rates(g, pw, noise, sc["bandwidth_hz"], sc["pairing"], rng)[0] >= minr).mean()
-                                     for g in md.channel_gain(ux, uy, X, Y, np.full(len(X), H), boxes)])
-        fixed = cov(np.array([centre]), np.array([centre]))[0]
-        rows.append((s, sc["mobility"], t, fixed, cov(GX, GY).max()))
+        args = (d.x.values, d.y.values, sc, rng, minr, boxes)
+        fixed = coverage(np.array([centre]), np.array([centre]), *args)[0]
+        rows.append((s, sc["mobility"], t, fixed, coverage(GX, GY, *args).max()))
 df = pd.DataFrame(rows, columns=["seed", "mobility", "t", "fixed_cov", "best_cov"])
 df["gap"] = df.best_cov - df.fixed_cov
-print(f"{PDBM:g} dBm, {N_SC} scenarios. Fixed drone (centre, {H:g} m) vs oracle-best position, mean over all snapshots:")
-print(df.groupby("mobility")[["fixed_cov", "best_cov", "gap"]].mean().round(3).assign(scenarios=df.groupby("mobility").seed.nunique()).to_string())
+print(f"{PDBM:g} dBm, {N_SC} scenarios. Fixed drone (centre, {H:g} m) vs oracle-best position, "
+      "mean over all snapshots:")
+by = df.groupby("mobility")
+print(by[["fixed_cov", "best_cov", "gap"]].mean().round(3).assign(scenarios=by.seed.nunique()).to_string())
 print("\nbiggest gap at any snapshot, per mobility:")
 print(df.groupby("mobility").gap.max().round(3).to_string())

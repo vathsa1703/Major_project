@@ -4,6 +4,7 @@ The 'policies' here are DEMO policies only (to see the env move); real baselines
 import argparse
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -59,12 +60,14 @@ if __name__ == "__main__":
         ax.plot(trail[:, 0], trail[:, 1], "b-", lw=1)
         ax.plot([x], [y], marker="^", color="blue", markersize=14)
         ax.set_xlim(0, L); ax.set_ylim(0, L); ax.set_aspect("equal")
-        ax.set_title(f"seed {a.seed} ({info['mobility']}, {info['n_users']} users)  policy={a.policy}\n"
-                     f"t={info['t']}s  coverage={info['coverage']:.2f}  battery={info['battery_wh']:.1f} Wh  h={h:.0f} m",
+        ax.set_title(f"seed {a.seed} ({info['mobility']}, {info['n_users']} users) policy={a.policy}\n"
+                     f"t={info['t']}s  coverage={info['coverage']:.2f}  battery={info['battery_wh']:.1f} Wh "
+                     f"h={h:.0f} m",
                      fontsize=9)
 
     idx = list(range(0, len(frames), 5)) + [len(frames) - 1]
     FuncAnimation(fig, lambda k: draw(idx[k]), frames=len(idx)).save(a.out, writer=PillowWriter(fps=6))
     draw(len(frames) - 1); fig.savefig(a.out.replace(".gif", "_last.png"), dpi=100)
     cov = np.mean([f[3]["coverage"] for f in frames])
-    print(f"{len(frames)} steps, mean coverage {cov:.3f}, battery left {frames[-1][3]['battery_wh']:.2f} Wh, saved {a.out}")
+    left = frames[-1][3]["battery_wh"]
+    print(f"{len(frames)} steps, mean coverage {cov:.3f}, battery left {left:.2f} Wh, saved {a.out}")
