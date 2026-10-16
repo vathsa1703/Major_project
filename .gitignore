@@ -25,3 +25,6 @@ Thumbs.db
 .coverage
 htmlcov/
 coverage.xml
+
+# papers (copyright): keep local
+docs/papers/
