@@ -17,7 +17,7 @@ testpaths = ["uav_dataset"]
 pythonpath = ["uav_dataset"]
 
 [tool.coverage.run]
-include = ["uav_dataset/make_dataset.py", "uav_dataset/uav_env.py"]   # physics + env; scripts are not counted
+include = ["uav_dataset/make_dataset.py", "uav_dataset/uav_env.py", "uav_dataset/baselines.py", "uav_dataset/evalstats.py"]   # physics + env; scripts are not counted
 
 [tool.coverage.report]
 fail_under = 80

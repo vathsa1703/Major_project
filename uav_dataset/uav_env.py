@@ -69,6 +69,18 @@ class UAVEnv(gym.Env):
     def user_xy(self, t=None):
         return self.P[self.t if t is None else t]
 
+    def evaluate(self, X, Y, H, p_w):
+        """Coverage the drone WOULD get at each candidate position (X, Y, H arrays) with transmit power p_w (W),
+        for the current user positions. Average channel (no fading). Does not change env state or the env rng.
+        Used by the search baselines (B3, B4, B5)."""
+        ux, uy = self.user_xy().T
+        X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
+        gains = md.channel_gain(ux, uy, X, Y, H, self.boxes)
+        rng = np.random.default_rng([self.scenario_seed, self.t])
+        return np.array([
+            (md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"], rng)[0]
+             >= self.min_rate).mean() for g in gains])
+
     # ------------------------------------------------------------------ step
     def step(self, action):
         a = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)

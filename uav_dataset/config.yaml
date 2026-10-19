@@ -104,3 +104,16 @@ env:
   reward: v2                    # v1 = coverage;  v2 = coverage - lambda_E * (energy_step / hover_energy_step)
   lambda_energy: 0.05           # ENGINEERING ASSUMPTION
   terminal_penalty: 1.0         # battery empty: reward -= penalty * share of users left uncovered
+
+# Baselines (Gate G3). B0 fixed, B1 follow the biggest crowd, B2 weighted k-means, B3 grid search, B4 PSO, B5 energy-aware.
+baselines:
+  eval_seeds: [0, 99]           # inclusive: 100 scenarios (the plan's G3 minimum)
+  altitude_m: 150               # fixed altitude for B0, B1, B2, B3, B5
+  power_frac: 1.0               # 1.0 = full power (action +1) for every baseline except B4 (which searches it)
+  replan_every_steps: 10        # K: how often B2, B3, B4, B5 recompute their target
+  kmeans_k: 3                   # B2: number of clusters
+  kmeans_iters: 20
+  rescue_weight: 3.0            # B2: a rescue user counts this much more than a normal user
+  grid_n: 10                    # B3, B5: grid_n x grid_n candidate positions (100 candidates)
+  pso: {particles: 12, iters: 10, inertia: 0.7, c1: 1.5, c2: 1.5}
+  energy_aware_margin: 1.0      # B5 moves only if (coverage gain x K) > margin x extra energy cost (in reward units)
