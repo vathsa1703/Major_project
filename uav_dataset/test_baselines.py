@@ -5,7 +5,7 @@ import pytest
 import make_dataset as md
 from baselines import POLICIES, B3GridSearch, B5EnergyAware, go_to, kmeans, make_policy
 from evalstats import mean_ci, paired_diff
-from run_baselines import run_episode, summarize
+from run_baselines import report, run_episode, summarize
 from uav_env import UAVEnv
 
 BCFG = md.CFG["baselines"]
@@ -183,3 +183,13 @@ def test_summarize_builds_a_table_with_paired_differences():
             for p, c in (("B0", 0.5), ("B1", 0.6)) for s in range(5)]
     text = summarize(pd.DataFrame(rows))
     assert "| B1 |" in text and "+0.100*" in text and "-0.100*" in text
+
+
+def test_report_has_both_the_settings_header_and_the_tables():
+    import pandas as pd
+    rows = [{"policy": p, "seed": s, "mobility": "surge", "coverage_full": 0.5, "coverage_alive": 0.5,
+             "survived": True, "served_user_s_per_wh": 1.0, "outage_rescue": 0.1, "fairness": 0.5}
+            for p in ("B0", "B1") for s in range(3)]
+    text = report(pd.DataFrame(rows), "hard", 16.0)
+    assert text.startswith("Profile: hard.") and "battery 16 Wh" in text
+    assert "| Policy |" in text and "Paired difference" in text and "by mobility model" in text

@@ -117,3 +117,19 @@ baselines:
   grid_n: 10                    # B3, B5: grid_n x grid_n candidate positions (100 candidates)
   pso: {particles: 12, iters: 10, inertia: 0.7, c1: 1.5, c2: 1.5}
   energy_aware_margin: 1.0      # B5 moves only if (coverage gain x K) > margin x extra energy cost (in reward units)
+
+# Named profiles = overrides of the settings above. Select with UAV_PROFILE=<name> or `--profile <name>`.
+# They exist because in the default scenarios a fixed drone already covers 88% of users, which leaves RL little to gain.
+# All values are engineering choices. Nothing here changes the default dataset.
+profiles:
+  lowpower:                      # weaker transmitter: position and altitude matter more
+    uav: {p_max_dbm: 20}
+  bigarea:                       # 2 x 2 km (the plan's out-of-distribution size): the centre no longer covers everyone
+    area_m: 2000
+  hard:                          # everything at once, plus dynamic-only mobility models and a battery that can last
+    area_m: 2000
+    uav: {p_max_dbm: 20}
+    obstacles: {n_range: [3, 8], size_range_m: [60, 200]}
+    mobility: {choices: [hotspot_jump, surge, group_drift, attraction]}
+    energy: {battery_wh: 16}
+    baselines: {grid_n: 14}      # keep the grid spacing about the same on the bigger map
