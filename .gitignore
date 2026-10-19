@@ -29,3 +29,6 @@ coverage.xml
 # experiment outputs (regenerate with run_baselines.py)
 results/
 uav_dataset/results/
+
+# papers (copyright): keep local
+docs/papers/
