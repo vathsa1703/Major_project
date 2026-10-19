@@ -35,7 +35,8 @@ All settings are in `config.yaml`. Change values there, never in the code. One c
 - `sweep`: seed, x, y, h, p_dbm, pairing, coverage, sum_rate_mbps, spectral_eff, fairness, outage_rescue, coverage_oma, sum_rate_oma_mbps, energy_j_per_step
 
 ## Not verified yet (do not present as validated)
-1. Al-Hourani (a, b, eta) and Zeng-Xu-Zhang energy parameters are from memory: check against the papers.
+1. Zeng energy formulas are checked against the paper, but our drone (W = 20 N) is our own choice and d0 = 0.6 is unverified.
+   Al-Hourani (a, b, eta) is NOT checked against the original paper. See `../docs/assumptions.md` for every parameter.
 2. No MATLAB parity test yet (Gate G1).
 3. Engineering assumptions with no source: per-class min rates, walking/surge speeds, 15 dB obstacle loss,
    5 W circuit power, 40% PA efficiency, 10 Wh battery, reward energy weight. Each needs a sensitivity range.
