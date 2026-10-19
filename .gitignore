@@ -25,3 +25,7 @@ Thumbs.db
 .coverage
 htmlcov/
 coverage.xml
+
+# experiment outputs (regenerate with run_baselines.py)
+results/
+uav_dataset/results/

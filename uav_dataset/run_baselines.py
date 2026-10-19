@@ -1,0 +1,129 @@
+"""Gate G3: run every baseline on the same seeded scenarios and write the comparison table.
+
+    python run_baselines.py                      # all 6 baselines on the 100 eval seeds (config: baselines.eval_seeds)
+    python run_baselines.py --seeds 5 --policies B0,B3
+Outputs (in ./results/, not committed): baselines_episodes.csv, baselines_summary.md, baselines.png.
+Main metric `coverage_full`: mean coverage over the whole 300 s horizon, counting a dead drone as 0 coverage.
+That is what makes saving battery matter. Everything is reproducible from config.yaml + the seed list.
+"""
+import argparse
+import os
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+import make_dataset as md
+from baselines import POLICIES, make_policy
+from evalstats import mean_ci, paired_diff
+from uav_env import UAVEnv
+
+RESULTS = Path(__file__).parent / "results"
+
+
+def run_episode(env, policy, seed):
+    """Play one episode with `policy` on scenario `seed`. Returns one row of metrics."""
+    env.reset(seed=seed)
+    policy.reset(env)
+    cov, fair, outage, reward, done, info = [], [], [], 0.0, False, {}
+    while not done:
+        _, r, term, trunc, info = env.step(policy.act(env))
+        cov.append(info["coverage"]); fair.append(info["fairness"]); outage.append(info["outage_rescue"])
+        reward += r
+        done = term or trunc
+    steps = len(cov)
+    return {
+        "seed": seed, "mobility": info["mobility"], "n_users": info["n_users"], "steps": steps,
+        "survived": bool(steps >= env.T), "coverage_full": float(np.sum(cov) / env.T),
+        "coverage_alive": float(np.mean(cov)), "reward_sum": reward, "fairness": float(np.mean(fair)),
+        "outage_rescue": float(np.mean(outage)), "battery_left_wh": info["battery_wh"],
+        "served_user_s_per_wh": info["served_user_s_per_wh"],
+    }
+
+
+def _task(args):
+    name, seed, battery_wh = args
+    return {"policy": name, **run_episode(UAVEnv(battery_wh=battery_wh), make_policy(name), seed)}
+
+
+def fmt(values, k=3):
+    """'mean +/- half_width' with k decimals."""
+    m, h = mean_ci(values)
+    return f"{m:.{k}f} +/- {h:.{k}f}"
+
+
+def summarize(df):
+    """Markdown table: mean +/- 95% CI per policy, plus paired differences of coverage_full."""
+    names = sorted(df.policy.unique())
+    n_sc = df.groupby("policy").seed.nunique().min()
+    lines = [f"Scenarios per policy: {n_sc}. Values are mean +/- 95% CI over scenarios.", "",
+             "| Policy | coverage_full | coverage_alive | survived the horizon | served-user-s per Wh "
+             "| rescue outage | fairness |",
+             "|---|---|---|---|---|---|---|"]
+    for n in names:
+        d = df[df.policy == n]
+        lines.append(f"| {n} | {fmt(d.coverage_full)} | {fmt(d.coverage_alive)} | {d.survived.mean():.0%} | "
+                     f"{fmt(d.served_user_s_per_wh, 1)} | {fmt(d.outage_rescue)} | {fmt(d.fairness)} |")
+    piv = df.pivot(index="seed", columns="policy", values="coverage_full")
+    lines += ["", "Paired difference in coverage_full (row minus column; positive = row is better; "
+                  "* = the 95% CI excludes 0):", "", "| | " + " | ".join(names) + " |", "|---|" + "---|" * len(names)]
+    for a in names:
+        cells = []
+        for b in names:
+            if a == b:
+                cells.append("-")
+                continue
+            m, h = paired_diff(piv[a], piv[b])
+            cells.append(f"{m:+.3f}{'*' if abs(m) > h else ''}")
+        lines.append(f"| {a} | " + " | ".join(cells) + " |")
+    by_mob = df.pivot_table(index="mobility", columns="policy", values="coverage_full", aggfunc="mean").round(3)
+    counts = df.drop_duplicates("seed").mobility.value_counts()
+    lines += ["", "Mean coverage_full by mobility model (scenario counts: "
+              + ", ".join(f"{k} {v}" for k, v in counts.items()) + "):", "", by_mob.to_markdown()]
+    return "\n".join(lines)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seeds", type=int, default=None, help="use only the first N eval seeds")
+    ap.add_argument("--policies", default=",".join(POLICIES))
+    ap.add_argument("--battery_wh", type=float, default=None, help="override energy.battery_wh")
+    ap.add_argument("--tag", default="", help="suffix for the output files")
+    ap.add_argument("--workers", type=int, default=min(4, os.cpu_count() or 1))
+    a = ap.parse_args()
+    lo, hi = md.CFG["baselines"]["eval_seeds"]
+    seeds = list(range(lo, hi + 1))[: a.seeds]
+    tasks = [(n, s, a.battery_wh) for n in a.policies.split(",") for s in seeds]
+    print(f"{len(tasks)} episodes ({len(seeds)} scenarios x {len(tasks) // len(seeds)} policies), {a.workers} workers")
+    with ProcessPoolExecutor(max_workers=a.workers) as pool:
+        rows = []
+        for i, row in enumerate(pool.map(_task, tasks, chunksize=2), 1):
+            rows.append(row)
+            if i % 50 == 0:
+                print(f"  {i}/{len(tasks)}")
+    df = pd.DataFrame(rows)
+    RESULTS.mkdir(exist_ok=True)
+    df.to_csv(RESULTS / f"baselines_episodes{a.tag}.csv", index=False)
+    text = summarize(df)
+    bat = a.battery_wh if a.battery_wh is not None else md.CFG["energy"]["battery_wh"]
+    horizon = md.CFG["mobility"]["episode_steps"]
+    text = f"Battery: {bat:g} Wh, horizon {horizon} s.\n\n" + text
+    (RESULTS / f"baselines_summary{a.tag}.md").write_text(text, encoding="utf-8")
+    print("\n" + text)
+
+    names = sorted(df.policy.unique())
+    fig, ax = plt.subplots(figsize=(6, 4))
+    stats = [mean_ci(df[df.policy == n].coverage_full) for n in names]
+    ax.bar(names, [s[0] for s in stats], yerr=[s[1] for s in stats], capsize=4)
+    ax.set_ylabel("coverage over the 300 s horizon (dead drone = 0)")
+    ax.set_title(f"Baselines on {df.seed.nunique()} scenarios (mean, 95% CI)")
+    plt.tight_layout(); plt.savefig(RESULTS / f"baselines{a.tag}.png", dpi=110)
+
+
+if __name__ == "__main__":
+    main()
