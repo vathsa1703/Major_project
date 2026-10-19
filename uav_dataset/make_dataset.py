@@ -180,6 +180,9 @@ def simulate_positions(seed, sc, u):
         return centre + np.stack([r * np.cos(a), r * np.sin(a)], axis=1)
 
     t_start = 0
+    if model == "static":                                # the crowd never moves (RL curriculum step 1)
+        P = np.repeat(pos[None], T + 1, axis=0)
+        return P, np.zeros_like(P)
     if model == "random_waypoint":
         target = rng.uniform(0, L, size=(n, 2))
     elif model == "attraction":
