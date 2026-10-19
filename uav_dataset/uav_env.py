@@ -21,12 +21,15 @@ from gymnasium import spaces
 import make_dataset as md
 
 CFG = md.CFG
+# The observation is built from these named groups, always in this order (scalars first, then the two maps).
+OBS_GROUPS = ("pos", "vel", "battery", "time", "prev", "heat_all", "heat_rescue")
 
 
 class UAVEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, reward=None, fading=None, battery_wh=None, scenario_seeds=None, scenario_overrides=None):
+    def __init__(self, reward=None, fading=None, battery_wh=None, scenario_seeds=None, scenario_overrides=None,
+                 obs_groups=None):
         """scenario_seeds: if given, reset() without an explicit scenario_seed draws the scenario from this pool
         (used for training, so the agent only ever sees the training seeds)."""
         # scenario_overrides: e.g. {"n_users": 500, "n_clusters": 4, "mobility": "surge", "n_obstacles": 6} replaces
@@ -39,6 +42,11 @@ class UAVEnv(gym.Env):
         self.dt = CFG["energy"]["dt_s"]
         self.uav = CFG["uav"]
         self.grid = CFG["env"]["grid"]
+        # obs_groups: which measurements the agent sees (default: all, 211 numbers). A smaller set is allowed,
+        # for example without the drone's own velocity. No group reveals the answer: only what a drone could measure.
+        self.obs_groups = tuple(obs_groups) if obs_groups else OBS_GROUPS
+        unknown = set(self.obs_groups) - set(OBS_GROUPS)
+        assert not unknown, f"unknown observation groups {sorted(unknown)}; choose from {OBS_GROUPS}"
         self.reward_version = reward or CFG["env"]["reward"]
         self.fading = CFG["fading"]["enabled"] if fading is None else fading
         self.battery_j = (battery_wh if battery_wh is not None else CFG["energy"]["battery_wh"]) * 3600.0
@@ -46,7 +54,14 @@ class UAVEnv(gym.Env):
         self.noise_psd = 10 ** ((CFG["noise_density_dbm_hz"] + CFG["noise_figure_db"] - 30) / 10)
         self.hover_step_j = md.energy_step_j(0.0, 0.0, 0.0)
         self.action_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
-        self.observation_space = spaces.Box(-1.0, 1.0, shape=(11 + 2 * self.grid**2,), dtype=np.float32)
+        self.observation_space = spaces.Box(-1.0, 1.0, shape=(self.obs_dim(self.obs_groups, self.grid),),
+                                            dtype=np.float32)
+
+    @staticmethod
+    def obs_dim(groups, grid):
+        sizes = {"pos": 3, "vel": 3, "battery": 1, "time": 1, "prev": 3, "heat_all": grid**2,
+                 "heat_rescue": grid**2}
+        return sum(sizes[g] for g in groups)
 
     # ------------------------------------------------------------------ episode
     def reset(self, seed=None, options=None):
@@ -78,9 +93,10 @@ class UAVEnv(gym.Env):
         self.prev = dict(coverage=0.0, throughput=0.0, fairness=0.0)
         return self._obs(), self._info(None)
 
-    def observation(self):
-        """The current observation (what the agent sees)."""
-        return self._obs()
+    def observation(self, groups=None):
+        """The current observation. `groups` picks a subset of observation groups (a trained agent asks for the
+        groups it was trained on); default = the groups this env was built with."""
+        return self._obs(groups)
 
     def user_xy(self, t=None):
         return self.P[self.t if t is None else t]
@@ -148,16 +164,21 @@ class UAVEnv(gym.Env):
         h, _, _ = np.histogram2d(xy[:, 0], xy[:, 1], bins=self.grid, range=[[0, self.L], [0, self.L]])
         return np.minimum(1.0, h.ravel() / len(xy) * 10.0)      # share of users per cell x10, capped at 1
 
-    def _obs(self):
-        u = self.uav
-        xy = self.user_xy()
-        scalars = [
-            self.x / self.L, self.y / self.L, (self.h - u["h_min_m"]) / (u["h_max_m"] - u["h_min_m"]),
-            self.vx / u["v_max_mps"], self.vy / u["v_max_mps"], self.vz / u["vz_max_mps"],
-            self.energy_left_j / self.battery_j, self.t / self.T,
-            self.prev["coverage"], self.prev["throughput"], self.prev["fairness"]]
-        o = np.concatenate([scalars, self._heatmap(xy), self._heatmap(xy[self.rescue])])
-        return np.clip(o, -1.0, 1.0).astype(np.float32)
+    def _obs(self, groups=None):
+        groups = self.obs_groups if groups is None else tuple(groups)
+        u, xy = self.uav, self.user_xy()
+        scalar = {
+            "pos": [self.x / self.L, self.y / self.L, (self.h - u["h_min_m"]) / (u["h_max_m"] - u["h_min_m"])],
+            "vel": [self.vx / u["v_max_mps"], self.vy / u["v_max_mps"], self.vz / u["vz_max_mps"]],
+            "battery": [self.energy_left_j / self.battery_j],
+            "time": [self.t / self.T],
+            "prev": [self.prev["coverage"], self.prev["throughput"], self.prev["fairness"]]}
+        chunks = [np.asarray(scalar[g], dtype=float) for g in OBS_GROUPS if g in groups and g in scalar]
+        if "heat_all" in groups:
+            chunks.append(self._heatmap(xy))
+        if "heat_rescue" in groups:
+            chunks.append(self._heatmap(xy[self.rescue]))
+        return np.clip(np.concatenate(chunks), -1.0, 1.0).astype(np.float32)
 
     def _info(self, served, rate=None, energy_step_j=0.0, p_tx_w=0.0):
         used_wh = self.energy_used_j / 3600.0

@@ -15,14 +15,14 @@ import pandas as pd
 
 import make_dataset as md
 from baselines import POLICIES
-from rl_utils import CONTROLS, RandomPolicy, RLPolicy, expand_action  # noqa: F401  (expand_action re-exported)
+from rl_utils import CONTROLS, RandomPolicy, RLPolicy, model_settings
 from run_baselines import _task, run_episode, summarize
 from uav_env import UAVEnv
 
 HERE = Path(__file__).parent
 
 
-def evaluate(names, seeds, model_path=None, controls="xy", workers=4, battery_wh=None, hold=1):
+def evaluate(names, seeds, model_path=None, controls=None, workers=4, battery_wh=None, hold=None):
     """Rows (one per policy x seed). Baselines run in parallel processes; Random and PPO run here."""
     rows = []
     base = [n for n in names if n in POLICIES]
@@ -31,10 +31,12 @@ def evaluate(names, seeds, model_path=None, controls="xy", workers=4, battery_wh
             rows += list(pool.map(_task, [(n, s, battery_wh) for n in base for s in seeds], chunksize=2))
     for n in names:
         if n == "Random":
-            pol = RandomPolicy(controls)
+            pol = RandomPolicy(controls or md.CFG["rl"]["controls"])
         elif n == "PPO":
             from stable_baselines3 import PPO
-            pol = RLPolicy(PPO.load(model_path, device="cpu"), controls, hold)
+            saved = model_settings(model_path)                 # the model's own controls / hold / observation groups
+            pol = RLPolicy(PPO.load(model_path, device="cpu"), controls or saved.get("controls", "xy"),
+                           hold or saved.get("hold_steps", 1), saved.get("obs_groups"))
         else:
             continue
         rows += [{"policy": n, **run_episode(UAVEnv(battery_wh=battery_wh), pol, s)} for s in seeds]
@@ -47,8 +49,8 @@ def main():
     ap.add_argument("--policies", default="Random,B0,B1,B2,B3,B5")
     ap.add_argument("--split", default="val", choices=["train", "val", "test"])
     ap.add_argument("--profile", default=md.CFG["rl"]["profile"])
-    ap.add_argument("--controls", default=md.CFG["rl"]["controls"], choices=list(CONTROLS))
-    ap.add_argument("--hold", type=int, default=md.CFG["rl"]["hold_steps"], help="seconds each decision is held")
+    ap.add_argument("--controls", default=None, choices=list(CONTROLS), help="default: read from the model's settings")
+    ap.add_argument("--hold", type=int, default=None, help="seconds each decision is held (default: from the model)")
     ap.add_argument("--seeds", type=int, default=None, help="use only the first N seeds of the split")
     ap.add_argument("--workers", type=int, default=min(4, os.cpu_count() or 1))
     ap.add_argument("--out", default=None, help="markdown file to write")

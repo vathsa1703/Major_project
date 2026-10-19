@@ -33,7 +33,7 @@ def summarize_run(env, frames):
     }
 
 
-def compare(seed, names, model_path=None, controls="xy", overrides=None, battery_wh=None, hold=1):
+def compare(seed, names, model_path=None, controls=None, overrides=None, battery_wh=None, hold=None):
     """Run every pilot on the same scenario. Returns {name: (env, frames, summary)}."""
     out = {}
     for n in names:
@@ -90,8 +90,8 @@ def main():
     ap.add_argument("--seed", type=int, default=5)
     ap.add_argument("--policies", default="B0,B2,B3,B4", help="comma list of B0..B6, random, ppo")
     ap.add_argument("--model", default=None)
-    ap.add_argument("--controls", default=md.CFG["rl"]["controls"], choices=list(CONTROLS))
-    ap.add_argument("--hold", type=int, default=md.CFG["rl"]["hold_steps"], help="seconds each decision is held (ppo)")
+    ap.add_argument("--controls", default=None, choices=list(CONTROLS), help="default: read from the model's settings")
+    ap.add_argument("--hold", type=int, default=None, help="seconds each decision is held (default: from the model)")
     ap.add_argument("--profile", default="default")
     ap.add_argument("--battery_wh", type=float, default=None)
     ap.add_argument("--users", type=int)

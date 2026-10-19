@@ -293,3 +293,83 @@ def test_rl_policy_decides_only_every_hold_seconds():
     for _ in range(25):
         env.step(pol.act(env))
     assert CountingModel.calls == 3                            # seconds 0, 10 and 20
+
+
+# ---------------------------------------------------------------- observation groups (what the agent sees)
+def test_default_observation_is_unchanged_and_explicit_all_groups_is_identical():
+    from uav_env import OBS_GROUPS
+    env = UAVEnv()
+    env.reset(seed=4)
+    assert env.observation_space.shape == (211,)
+    assert np.array_equal(env.observation(), env.observation(OBS_GROUPS))
+
+
+def test_a_smaller_observation_drops_only_the_named_groups_and_keeps_the_rest_in_order():
+    full = UAVEnv()
+    lean = UAVEnv(obs_groups=("pos", "heat_all", "heat_rescue"))
+    full.reset(seed=4)
+    lean.reset(seed=4)
+    assert lean.observation_space.shape == (3 + 200,)
+    o_full, o_lean = full.observation(), lean.observation()
+    assert np.array_equal(o_lean[:3], o_full[:3])                 # position
+    assert np.array_equal(o_lean[3:], o_full[11:])                # the two maps
+    # a trained policy can ask a full env for just the subset it knows
+    assert np.array_equal(full.observation(("pos", "heat_all", "heat_rescue")), o_lean)
+
+
+def test_unknown_observation_group_is_refused_and_dimensions_match_the_space():
+    with pytest.raises(AssertionError):
+        UAVEnv(obs_groups=("pos", "the_answer"))
+    for groups in (("pos",), ("pos", "vel", "battery"), ("heat_all",), ("pos", "prev", "heat_all", "heat_rescue")):
+        env = UAVEnv(obs_groups=groups)
+        obs, _ = env.reset(seed=2)
+        assert obs.shape == env.observation_space.shape == (UAVEnv.obs_dim(groups, env.grid),)
+        assert env.observation_space.contains(obs)
+
+
+def test_rl_policy_asks_the_env_for_its_own_observation_groups():
+    from rl_utils import RLPolicy
+
+    class SeesWhatItAsksFor:
+        def __init__(self):
+            self.shapes = []
+
+        def predict(self, obs, deterministic=True):
+            self.shapes.append(obs.shape)
+            return np.array([0.0, 0.0], dtype=np.float32), None
+
+    env = UAVEnv(battery_wh=1000.0)                                # the env itself shows all 211 numbers
+    env.reset(seed=4)
+    m = SeesWhatItAsksFor()
+    pol = RLPolicy(m, "goto", hold=10, obs_groups=("pos", "heat_all", "heat_rescue"))
+    pol.reset(env)
+    env.step(pol.act(env))
+    assert m.shapes == [(203,)]
+
+
+# ---------------------------------------------------------------- settings saved next to a model
+def test_model_settings_are_found_next_to_the_model_or_one_folder_up(tmp_path):
+    import json
+
+    from rl_utils import model_settings
+    run = tmp_path / "run1"
+    (run / "checkpoints").mkdir(parents=True)
+    (run / "config.json").write_text(json.dumps({"controls": "goto", "hold_steps": 10}), encoding="utf-8")
+    assert model_settings(run / "model.zip") == {"controls": "goto", "hold_steps": 10}
+    assert model_settings(run / "checkpoints" / "rl_model_1000_steps.zip")["hold_steps"] == 10
+    assert model_settings(tmp_path / "nowhere" / "model.zip") == {}
+
+
+def test_old_models_without_hold_in_their_settings_default_to_deciding_every_second(tmp_path):
+    import json
+
+    from view_run import build_policy
+    pytest.importorskip("stable_baselines3")
+    from stable_baselines3 import PPO
+    from stable_baselines3.common.vec_env import DummyVecEnv
+    venv = DummyVecEnv([lambda: make_env("xy", "v1", scenario_seeds=[1, 2])])
+    PPO("MlpPolicy", venv, n_steps=32, batch_size=32, n_epochs=1, device="cpu", seed=0).save(tmp_path / "model")
+    old_config = {"controls": "xy"}                                  # an old model: no hold key
+    (tmp_path / "config.json").write_text(json.dumps(old_config), encoding="utf-8")
+    pol = build_policy("ppo", str(tmp_path / "model.zip"))
+    assert pol.controls == "xy" and pol.hold == 1 and pol.obs_groups is None

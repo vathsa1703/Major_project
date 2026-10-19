@@ -9,6 +9,9 @@ Two ways to steer, because they are not equally easy to learn:
                           drift away: see CLAUDE.md.)
 Unused controls are held: altitude at the start height and full power.
 """
+import json
+from pathlib import Path
+
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -77,10 +80,11 @@ class HoldWrapper(gym.Wrapper):
         return obs, total, terminated, truncated, info
 
 
-def make_env(controls="xy", reward=None, scenario_seeds=None, battery_wh=None, hold=1):
+def make_env(controls="xy", reward=None, scenario_seeds=None, battery_wh=None, hold=1, obs_groups=None):
     """A training/eval env. Call AFTER md.apply_profile(...): the env reads the config when it is created.
     hold = how many seconds the agent's choice is held (1 = it decides every second)."""
-    env = ControlWrapper(UAVEnv(reward=reward, battery_wh=battery_wh, scenario_seeds=scenario_seeds), controls)
+    env = ControlWrapper(UAVEnv(reward=reward, battery_wh=battery_wh, scenario_seeds=scenario_seeds,
+                                obs_groups=obs_groups), controls)
     return HoldWrapper(env, hold) if hold > 1 else env
 
 
@@ -94,8 +98,9 @@ class RLPolicy:
 
     name = "PPO"
 
-    def __init__(self, model, controls, hold=1):
-        self.model, self.controls, self.hold = model, controls, hold      # hold must match how the model was trained
+    def __init__(self, model, controls, hold=1, obs_groups=None):
+        # controls, hold and obs_groups must match how the model was trained (see model_settings)
+        self.model, self.controls, self.hold, self.obs_groups = model, controls, hold, obs_groups
         self.last = None
 
     def reset(self, env):
@@ -103,7 +108,7 @@ class RLPolicy:
 
     def act(self, env):
         if self.last is None or env.t % self.hold == 0:                  # decide every `hold` seconds
-            self.last, _ = self.model.predict(env.observation(), deterministic=True)
+            self.last, _ = self.model.predict(env.observation(self.obs_groups), deterministic=True)
         return expand_action(self.last, self.controls, env)
 
 
@@ -120,3 +125,16 @@ class RandomPolicy:
 
     def act(self, env):
         return expand_action(self.rng.uniform(-1, 1, CONTROLS[self.controls]), self.controls, env)
+
+
+# ---------------------------------------------------------------- settings saved next to every trained model
+def model_settings(model_path):
+    """The settings a model was trained with (controls, hold_steps, obs_groups, policy), read from the
+    config.json that rl_train.py saves next to it. Old models lack some keys; their defaults are the old behaviour
+    (hold 1, all groups)."""
+    p = Path(model_path).resolve()
+    for folder in (p.parent, p.parent.parent):
+        cfg = folder / "config.json"
+        if cfg.exists():
+            return json.loads(cfg.read_text(encoding="utf-8"))
+    return {}
