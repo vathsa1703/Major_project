@@ -114,7 +114,8 @@ baselines:
   kmeans_k: 3                   # B2: number of clusters
   kmeans_iters: 20
   rescue_weight: 3.0            # B2: a rescue user counts this much more than a normal user
-  grid_n: 10                    # B3, B5: grid_n x grid_n candidate positions (100 candidates)
+  grid_n: 10                    # B3, B5, B6: grid_n x grid_n candidate positions (100 candidates)
+  altitude_levels_m: [50, 100, 150, 200, 300]   # B6: altitudes tried at every grid position
   pso: {particles: 12, iters: 10, inertia: 0.7, c1: 1.5, c2: 1.5}
   energy_aware_margin: 1.0      # B5 moves only if (coverage gain x K) > margin x extra energy cost (in reward units)
 

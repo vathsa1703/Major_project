@@ -193,3 +193,41 @@ def test_report_has_both_the_settings_header_and_the_tables():
     text = report(pd.DataFrame(rows), "hard", 16.0)
     assert text.startswith("Profile: hard.") and "battery 16 Wh" in text
     assert "| Policy |" in text and "Paired difference" in text and "by mobility model" in text
+
+
+# ---------------------------------------------------------------- B6 (grid search + altitude)
+def _score(env, target):
+    """One-step coverage at a (x, y, h) target with full power."""
+    return env.evaluate(target[0], target[1], target[2], env.p_max_w)[0]
+
+
+def test_b6_candidate_set_contains_b3s_so_it_can_never_score_lower_for_one_step():
+    from baselines import B6GridAltitude
+    assert 150 in BCFG["altitude_levels_m"] and BCFG["altitude_m"] == 150     # B3 searches at 150 m
+    for seed in (2, 3, 4):
+        env = _env(seed=seed)
+        b3, b6 = B3GridSearch(), B6GridAltitude()
+        for p in (b3, b6):
+            p.reset(env)
+            p.plan(env)
+        assert _score(env, b6.target) >= _score(env, b3.target) - 1e-12
+
+
+def test_b6_picks_the_altitude_the_landscape_rewards(monkeypatch):
+    from baselines import B6GridAltitude
+    env = _env()
+    pol = B6GridAltitude()
+    pol.reset(env)
+    monkeypatch.setattr(env, "evaluate", lambda X, Y, H, p: np.where(np.atleast_1d(H) == 50.0, 0.9, 0.2))
+    pol.plan(env)
+    assert pol.target[2] == 50.0
+
+
+def test_b6_targets_stay_inside_the_allowed_space():
+    from baselines import B6GridAltitude
+    env = _env()
+    pol = B6GridAltitude()
+    pol.reset(env)
+    pol.plan(env)
+    x, y, h = pol.target
+    assert 0 <= x <= env.L and 0 <= y <= env.L and h in BCFG["altitude_levels_m"] + [env.h]
