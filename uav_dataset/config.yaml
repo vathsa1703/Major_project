@@ -146,12 +146,13 @@ profiles:
 rl:
   algo: PPO
   profile: rl_static             # which scenario profile to train on
-  controls: xy                   # curriculum: xy (move only) -> xyz (+ altitude) -> xyzp (+ power)
+  hold_steps: 10                 # the agent decides once every 10 s (like the baselines)
+  controls: goto                 # curriculum: goto (where to fly) -> gotoz (+ altitude) -> gotozp (+ power); xy/xyz/xyzp = velocity versions
   reward: v1                     # v1 = coverage only; v2 adds the energy cost (curriculum step 5)
   seed: 0
-  total_timesteps: 300000
+  total_timesteps: 100000        # agent DECISIONS (each held hold_steps seconds): 100k decisions = 1M seconds
   n_envs: 4
-  n_steps: 512                   # steps per env per update
+  n_steps: 256                   # decisions per env per update
   batch_size: 256
   n_epochs: 10
   learning_rate: 0.0003
@@ -162,7 +163,7 @@ rl:
   net_arch: [64, 64]
   log_std_init: -1.0             # start with action noise of about 0.37 (SB3 default 0 = 1.0, too noisy here)
   norm_reward: true              # scale rewards (returns are ~150): standard for PPO value learning
-  val_eval_every_steps: 100000   # print a deterministic score on the first val scenarios during training
+  val_eval_every_steps: 20000    # (decisions) print a deterministic score on the first val scenarios during training
   val_eval_scenarios: 8
-  checkpoint_every_steps: 50000
+  checkpoint_every_steps: 10000
   out_dir: results/rl

@@ -22,7 +22,7 @@ from uav_env import UAVEnv
 HERE = Path(__file__).parent
 
 
-def evaluate(names, seeds, model_path=None, controls="xy", workers=4, battery_wh=None):
+def evaluate(names, seeds, model_path=None, controls="xy", workers=4, battery_wh=None, hold=1):
     """Rows (one per policy x seed). Baselines run in parallel processes; Random and PPO run here."""
     rows = []
     base = [n for n in names if n in POLICIES]
@@ -34,7 +34,7 @@ def evaluate(names, seeds, model_path=None, controls="xy", workers=4, battery_wh
             pol = RandomPolicy(controls)
         elif n == "PPO":
             from stable_baselines3 import PPO
-            pol = RLPolicy(PPO.load(model_path, device="cpu"), controls)
+            pol = RLPolicy(PPO.load(model_path, device="cpu"), controls, hold)
         else:
             continue
         rows += [{"policy": n, **run_episode(UAVEnv(battery_wh=battery_wh), pol, s)} for s in seeds]
@@ -48,6 +48,7 @@ def main():
     ap.add_argument("--split", default="val", choices=["train", "val", "test"])
     ap.add_argument("--profile", default=md.CFG["rl"]["profile"])
     ap.add_argument("--controls", default=md.CFG["rl"]["controls"], choices=list(CONTROLS))
+    ap.add_argument("--hold", type=int, default=md.CFG["rl"]["hold_steps"], help="seconds each decision is held")
     ap.add_argument("--seeds", type=int, default=None, help="use only the first N seeds of the split")
     ap.add_argument("--workers", type=int, default=min(4, os.cpu_count() or 1))
     ap.add_argument("--out", default=None, help="markdown file to write")
@@ -56,7 +57,7 @@ def main():
     md.apply_profile(a.profile)
     names = a.policies.split(",") + (["PPO"] if a.model else [])
     seeds = md.seeds(a.split)[: a.seeds]
-    df = evaluate(names, seeds, a.model, a.controls, a.workers)
+    df = evaluate(names, seeds, a.model, a.controls, a.workers, hold=a.hold)
     head = (f"Split: {a.split} ({len(seeds)} scenarios, seeds {seeds[0]}-{seeds[-1]}). Profile: {a.profile}. "
             f"Controls: {a.controls}. Area {md.CFG['area_m']:g} m, {md.CFG['uav']['p_max_dbm']:g} dBm, "
             f"battery {md.CFG['energy']['battery_wh']:g} Wh.")

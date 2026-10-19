@@ -1,7 +1,13 @@
 """RL helpers: curriculum control wrapper, env factory, and policy adapters that plug into run_baselines.run_episode.
 
-Curriculum (the plan's order): `xy` = the agent only moves horizontally (altitude fixed at the start height, full
-power) -> `xyz` = + altitude -> `xyzp` = + transmit power. Each step must work before the next one is switched on.
+Curriculum (the plan's order): the agent controls only position, then also altitude, then also power.
+Two ways to steer, because they are not equally easy to learn:
+  xy / xyz / xyzp      = VELOCITY controls: the action is how fast to fly. Hovering needs the agent to output exactly 0.
+  goto / gotoz / gotozp = WAYPOINT controls: the action is WHERE to fly (a spot on the map, then also an altitude, then
+                          also the power). The drone flies there at full speed and stays when it arrives, so staying
+                          over the crowd needs no special effort. (Velocity controls made PPO find the crowd and then
+                          drift away: see CLAUDE.md.)
+Unused controls are held: altitude at the start height and full power.
 """
 import gymnasium as gym
 import numpy as np
@@ -10,17 +16,32 @@ from gymnasium import spaces
 import make_dataset as md
 from uav_env import UAVEnv
 
-CONTROLS = {"xy": 2, "xyz": 3, "xyzp": 4}
+CONTROLS = {"xy": 2, "xyz": 3, "xyzp": 4, "goto": 2, "gotoz": 3, "gotozp": 4}
+WAYPOINT = ("goto", "gotoz", "gotozp")
 
 
-def expand_action(a, controls):
-    """Agent action (2, 3 or 4 numbers) -> the env's 4 numbers [vx, vy, vz, power]. Unused controls are held:
-    vz = 0 (keep altitude) and power = +1 (full power)."""
+def expand_action(a, controls, env=None):
+    """Agent action (2, 3 or 4 numbers) -> the env's 4 numbers [vx, vy, vz, power].
+    Waypoint controls need `env` (to know where the drone is now)."""
     a = np.asarray(a, dtype=np.float64).ravel()
     k = CONTROLS[controls]
     assert len(a) == k, f"controls={controls!r} needs {k} numbers, got {len(a)}"
     full = np.array([0.0, 0.0, 0.0, 1.0])
-    full[:k] = a
+    if controls not in WAYPOINT:
+        full[:k] = a
+        return full
+    assert env is not None, "waypoint controls need the env"
+    e, u = env.unwrapped if hasattr(env, "unwrapped") else env, md.CFG["uav"]
+    tx, ty = (a[0] + 1) / 2 * e.L, (a[1] + 1) / 2 * e.L                      # target spot on the map
+    d = np.array([tx - e.x, ty - e.y]) / (u["v_max_mps"] * e.dt)
+    if np.linalg.norm(d) > 1.0:
+        d = d / np.linalg.norm(d)                                           # fly at full speed, never faster
+    full[:2] = d
+    if k >= 3:                                                              # target altitude
+        th = u["h_min_m"] + (a[2] + 1) / 2 * (u["h_max_m"] - u["h_min_m"])
+        full[2] = np.clip((th - e.h) / (u["vz_max_mps"] * e.dt), -1.0, 1.0)
+    if k >= 4:
+        full[3] = a[3]
     return full
 
 
@@ -33,12 +54,34 @@ class ControlWrapper(gym.ActionWrapper):
         self.action_space = spaces.Box(-1.0, 1.0, shape=(CONTROLS[controls],), dtype=np.float32)
 
     def action(self, action):
-        return expand_action(action, self.controls)
+        return expand_action(action, self.controls, self.env)
 
 
-def make_env(controls="xy", reward=None, scenario_seeds=None, battery_wh=None):
-    """A training/eval env. Call AFTER md.apply_profile(...): the env reads the config when it is created."""
-    return ControlWrapper(UAVEnv(reward=reward, battery_wh=battery_wh, scenario_seeds=scenario_seeds), controls)
+class HoldWrapper(gym.Wrapper):
+    """The agent decides once every `k` seconds; its choice is held (and re-applied each second) for `k` steps and the
+    rewards of those steps are added up. This is the rhythm the baselines use (they re-plan every K = 10 s). It turns a
+    300-decision game into a 30-decision game, which is much easier to learn, and stops the second-by-second
+    overshoot-and-correct circling seen with k = 1."""
+
+    def __init__(self, env, k):
+        super().__init__(env)
+        self.k = k
+
+    def step(self, action):
+        total = 0.0
+        for _ in range(self.k):
+            obs, r, terminated, truncated, info = self.env.step(action)
+            total += r
+            if terminated or truncated:
+                break
+        return obs, total, terminated, truncated, info
+
+
+def make_env(controls="xy", reward=None, scenario_seeds=None, battery_wh=None, hold=1):
+    """A training/eval env. Call AFTER md.apply_profile(...): the env reads the config when it is created.
+    hold = how many seconds the agent's choice is held (1 = it decides every second)."""
+    env = ControlWrapper(UAVEnv(reward=reward, battery_wh=battery_wh, scenario_seeds=scenario_seeds), controls)
+    return HoldWrapper(env, hold) if hold > 1 else env
 
 
 def train_seeds():
@@ -51,15 +94,17 @@ class RLPolicy:
 
     name = "PPO"
 
-    def __init__(self, model, controls):
-        self.model, self.controls = model, controls
+    def __init__(self, model, controls, hold=1):
+        self.model, self.controls, self.hold = model, controls, hold      # hold must match how the model was trained
+        self.last = None
 
     def reset(self, env):
-        pass
+        self.last = None
 
     def act(self, env):
-        action, _ = self.model.predict(env.observation(), deterministic=True)
-        return expand_action(action, self.controls)
+        if self.last is None or env.t % self.hold == 0:                  # decide every `hold` seconds
+            self.last, _ = self.model.predict(env.observation(), deterministic=True)
+        return expand_action(self.last, self.controls, env)
 
 
 class RandomPolicy:
@@ -74,4 +119,4 @@ class RandomPolicy:
         self.rng = np.random.default_rng([env.scenario_seed, 99])
 
     def act(self, env):
-        return expand_action(self.rng.uniform(-1, 1, CONTROLS[self.controls]), self.controls)
+        return expand_action(self.rng.uniform(-1, 1, CONTROLS[self.controls]), self.controls, env)

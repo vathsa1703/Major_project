@@ -184,3 +184,112 @@ def test_viewer_builds_every_kind_of_pilot():
         build_policy("nonsense")
     env, frames = run(3, build_policy("B0"), battery_wh=1000.0, overrides={"n_users": 100})
     assert len(frames) == env.T and frames[0][0].shape == (100, 2)
+
+
+# ---------------------------------------------------------------- waypoint ("fly to this spot") controls
+def _goto_env(controls="goto"):
+    env = ControlWrapper(UAVEnv(battery_wh=1000.0), controls)
+    env.reset(seed=3)
+    return env
+
+
+def test_waypoint_controls_need_the_env():
+    with pytest.raises(AssertionError):
+        expand_action([0.0, 0.0], "goto")
+
+
+def test_goto_maps_the_action_square_onto_the_map():
+    env = _goto_env().unwrapped
+    L = env.L
+    for a, (tx, ty) in (([-1, -1], (0, 0)), ([1, 1], (L, L)), ([0, 0], (L / 2, L / 2))):
+        full = expand_action(a, "goto", env)
+        want = np.array([tx - env.x, ty - env.y])
+        if np.linalg.norm(want) > 1e-9:                       # direction points at the target
+            assert np.dot(full[:2], want) > 0 and np.allclose(full[:2] / max(np.linalg.norm(full[:2]), 1e-9),
+                                                              want / np.linalg.norm(want))
+        assert full[2] == 0.0 and full[3] == 1.0              # altitude held, full power
+
+
+def test_goto_flies_to_the_target_and_then_stays_there():
+    env = _goto_env()
+    a = np.array([0.5, -0.5], dtype=np.float32)               # target (0.75 L, 0.25 L)
+    target = np.array([0.75, 0.25]) * env.unwrapped.L
+    speeds = []
+    for _ in range(150):
+        *_, info = env.step(a)
+        speeds.append(np.hypot(env.unwrapped.vx, env.unwrapped.vy))
+    assert np.hypot(info["x"] - target[0], info["y"] - target[1]) < 2.0
+    assert max(speeds) <= md.CFG["uav"]["v_max_mps"] + 1e-9
+    assert max(speeds[-10:]) < 0.5                            # it has stopped (this is what velocity controls lacked)
+    assert info["h"] == md.CFG["uav"]["start_h_m"]
+
+
+def test_gotoz_and_gotozp_steer_altitude_and_power():
+    env = _goto_env("gotoz")
+    for _ in range(80):
+        *_, info = env.step(np.array([0.0, 0.0, 1.0], dtype=np.float32))
+    assert info["h"] == pytest.approx(md.CFG["uav"]["h_max_m"])
+    env = _goto_env("gotozp")
+    *_, info = env.step(np.array([0.0, 0.0, 0.0, -1.0], dtype=np.float32))
+    assert info["p_tx_w"] < env.unwrapped.p_max_w * 0.01
+
+
+def test_policy_adapters_handle_waypoint_controls():
+    env = UAVEnv(battery_wh=1000.0)
+    env.reset(seed=5)
+    pol = RandomPolicy("goto")
+    pol.reset(env)
+    a = pol.act(env)
+    assert a.shape == (4,) and abs(a[0]) <= 1 and abs(a[1]) <= 1 and a[2] == 0.0 and a[3] == 1.0
+
+
+# ---------------------------------------------------------------- holding a decision for k seconds
+def test_hold_wrapper_repeats_the_choice_and_adds_up_the_rewards():
+    from rl_utils import HoldWrapper
+    a = np.array([0.4, -0.2], dtype=np.float32)
+    held = HoldWrapper(ControlWrapper(UAVEnv(battery_wh=1000.0, reward="v1"), "goto"), 10)
+    held.reset(seed=3)
+    _, r_held, *_ = held.step(a)
+    assert held.unwrapped.t == 10                              # ten simulated seconds in one decision
+    ref = ControlWrapper(UAVEnv(battery_wh=1000.0, reward="v1"), "goto")
+    ref.reset(seed=3)
+    r_ref = sum(ref.step(a)[1] for _ in range(10))
+    assert r_held == pytest.approx(r_ref)
+
+
+def test_hold_wrapper_stops_exactly_at_the_end_of_the_episode():
+    from rl_utils import HoldWrapper
+    held = HoldWrapper(ControlWrapper(UAVEnv(battery_wh=1000.0), "goto"), 7)    # 300 is not a multiple of 7
+    held.reset(seed=3)
+    a = np.zeros(2, dtype=np.float32)
+    for _ in range(100):
+        _, _, term, trunc, _ = held.step(a)
+        if term or trunc:
+            break
+    assert trunc and held.unwrapped.t == held.unwrapped.T == 300
+
+
+def test_make_env_only_wraps_when_asked_to_hold():
+    from rl_utils import HoldWrapper
+    assert not isinstance(make_env("goto", hold=1), HoldWrapper)
+    assert isinstance(make_env("goto", hold=10), HoldWrapper)
+    check_env(make_env("goto", hold=10), skip_render_check=True)
+
+
+def test_rl_policy_decides_only_every_hold_seconds():
+    from rl_utils import RLPolicy
+
+    class CountingModel:
+        calls = 0
+
+        def predict(self, obs, deterministic=True):
+            CountingModel.calls += 1
+            return np.array([0.1, 0.1], dtype=np.float32), None
+
+    env = UAVEnv(battery_wh=1000.0)
+    env.reset(seed=4)
+    pol = RLPolicy(CountingModel(), "goto", hold=10)
+    pol.reset(env)
+    for _ in range(25):
+        env.step(pol.act(env))
+    assert CountingModel.calls == 3                            # seconds 0, 10 and 20

@@ -17,7 +17,7 @@ from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecNormalize
 
 import make_dataset as md
-from rl_utils import make_env, train_seeds
+from rl_utils import CONTROLS, make_env, train_seeds
 
 HERE = Path(__file__).parent
 
@@ -48,9 +48,9 @@ class ValScoreCallback(BaseCallback):
     """Every `every` steps, play the first few VALIDATION scenarios with the deterministic policy and print the mean
     coverage over the horizon. Lets us watch real progress (and see over-fitting) during a long run."""
 
-    def __init__(self, every, seeds, controls):
+    def __init__(self, every, seeds, controls, hold=1):
         super().__init__()
-        self.every, self.seeds, self.controls, self.last = every, seeds, controls, 0
+        self.every, self.seeds, self.controls, self.hold, self.last = every, seeds, controls, hold, 0
         self.history = []
 
     def _on_step(self):
@@ -59,7 +59,7 @@ class ValScoreCallback(BaseCallback):
             from rl_utils import RLPolicy
             from run_baselines import run_episode
             from uav_env import UAVEnv
-            pol = RLPolicy(self.model, self.controls)
+            pol = RLPolicy(self.model, self.controls, self.hold)
             cov = float(np.mean([run_episode(UAVEnv(), pol, s)["coverage_full"] for s in self.seeds]))
             self.history.append((self.num_timesteps, cov))
             self.logger.record("val/coverage_full", cov)
@@ -71,8 +71,8 @@ class ValScoreCallback(BaseCallback):
 def build(cfg, profile):
     md.apply_profile(profile)
     pool = train_seeds()
-    venv = DummyVecEnv([lambda: make_env(cfg["controls"], cfg["reward"], scenario_seeds=pool)
-                        for _ in range(cfg["n_envs"])])
+    venv = DummyVecEnv([lambda: make_env(cfg["controls"], cfg["reward"], scenario_seeds=pool,
+                                         hold=cfg["hold_steps"]) for _ in range(cfg["n_envs"])])
     venv = VecMonitor(venv)
     # reward scaling only: observations are already in [-1, 1], so a saved model needs no extra statistics
     return VecNormalize(venv, norm_obs=False, norm_reward=True, gamma=cfg["gamma"]) if cfg["norm_reward"] else venv
@@ -82,16 +82,18 @@ def main():
     cfg = dict(md.CFG["rl"])
     ap = argparse.ArgumentParser()
     ap.add_argument("--profile", default=cfg["profile"])
-    ap.add_argument("--controls", default=cfg["controls"], choices=["xy", "xyz", "xyzp"])
+    ap.add_argument("--controls", default=cfg["controls"], choices=list(CONTROLS))
     ap.add_argument("--reward", default=cfg["reward"], choices=["v1", "v2"])
     ap.add_argument("--timesteps", type=int, default=cfg["total_timesteps"])
     ap.add_argument("--seed", type=int, default=cfg["seed"])
     ap.add_argument("--name", default=None)
     ap.add_argument("--log_std_init", type=float, default=cfg["log_std_init"])
+    ap.add_argument("--hold", type=int, default=cfg["hold_steps"], help="seconds each decision is held")
     ap.add_argument("--no_norm_reward", action="store_true")
     a = ap.parse_args()
     cfg.update(profile=a.profile, controls=a.controls, reward=a.reward, total_timesteps=a.timesteps, seed=a.seed,
-               log_std_init=a.log_std_init, norm_reward=cfg["norm_reward"] and not a.no_norm_reward)
+               log_std_init=a.log_std_init, hold_steps=a.hold,
+               norm_reward=cfg["norm_reward"] and not a.no_norm_reward)
     name = a.name or f"{cfg['profile']}_{cfg['controls']}_{cfg['reward']}_s{cfg['seed']}"
     out = HERE / cfg["out_dir"] / name
     out.mkdir(parents=True, exist_ok=True)
@@ -105,7 +107,7 @@ def main():
         policy_kwargs={"net_arch": list(cfg["net_arch"]), "log_std_init": cfg["log_std_init"]},
         tensorboard_log=str(out / "tb"), device="cpu", verbose=1)
     val_cb = ValScoreCallback(max(cfg["val_eval_every_steps"] // cfg["n_envs"], 1) * cfg["n_envs"],
-                              md.seeds("val")[: cfg["val_eval_scenarios"]], cfg["controls"])
+                              md.seeds("val")[: cfg["val_eval_scenarios"]], cfg["controls"], cfg["hold_steps"])
     callbacks = [RewardPartsCallback(), val_cb,
                  CheckpointCallback(max(cfg["checkpoint_every_steps"] // cfg["n_envs"], 1), str(out / "checkpoints"))]
     t0 = time.time()
