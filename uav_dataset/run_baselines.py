@@ -57,6 +57,15 @@ def fmt(values, k=3):
     return f"{m:.{k}f} +/- {h:.{k}f}"
 
 
+def md_table(df):
+    """A DataFrame as a markdown table (no tabulate dependency)."""
+    head = "| " + " | ".join([df.index.name or ""] + [str(c) for c in df.columns]) + " |"
+    rule = "|" + "---|" * (len(df.columns) + 1)
+    body = zip(df.index, df.to_numpy(), strict=True)
+    rows = ["| " + " | ".join([str(i)] + [f"{v:.3f}" for v in r]) + " |" for i, r in body]
+    return "\n".join([head, rule, *rows])
+
+
 def summarize(df):
     """Markdown table: mean +/- 95% CI per policy, plus paired differences of coverage_full."""
     names = sorted(df.policy.unique())
@@ -84,7 +93,7 @@ def summarize(df):
     by_mob = df.pivot_table(index="mobility", columns="policy", values="coverage_full", aggfunc="mean").round(3)
     counts = df.drop_duplicates("seed").mobility.value_counts()
     lines += ["", "Mean coverage_full by mobility model (scenario counts: "
-              + ", ".join(f"{k} {v}" for k, v in counts.items()) + "):", "", by_mob.to_markdown()]
+              + ", ".join(f"{k} {v}" for k, v in counts.items()) + "):", "", md_table(by_mob)]
     return "\n".join(lines)
 
 
