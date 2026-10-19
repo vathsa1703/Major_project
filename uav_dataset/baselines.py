@@ -1,4 +1,5 @@
-"""Baseline controllers B0-B5. Each one drives the SAME UAVEnv through env.step(), so comparisons are fair.
+"""Baseline controllers B0-B5, plus B6 (B3 with altitude search).
+Each one drives the SAME UAVEnv through env.step(), so comparisons are fair.
 
     policy = make_policy("B2")
     obs, info = env.reset(seed=3); policy.reset(env)
@@ -136,6 +137,25 @@ class B3GridSearch(Policy):
         self.target = (X[j], Y[j], BCFG["altitude_m"])
 
 
+class B6GridAltitude(Policy):
+    """B6 (B3 plus altitude): every K steps, score every grid position at every altitude level (plus the current
+    spot), go to the best. Added so B4's lead over B3 can be split into 'chooses altitude' and 'places better'.
+    Power stays at full, like B3."""
+    name = "B6"
+
+    def plan(self, env):
+        X, Y = _grid(env)
+        levels = np.array(BCFG["altitude_levels_m"], dtype=float)
+        CX, CH = np.repeat(X, len(levels)), np.tile(levels, len(X))
+        CY = np.repeat(Y, len(levels))
+        CX, CY, CH = np.append(CX, env.x), np.append(CY, env.y), np.append(CH, env.h)
+        cov = env.evaluate(CX, CY, CH, env.p_max_w * self.power)
+        best = np.flatnonzero(cov >= cov.max() - 1e-12)
+        d = np.sqrt((CX[best] - env.x) ** 2 + (CY[best] - env.y) ** 2 + (CH[best] - env.h) ** 2)
+        j = best[np.argmin(d)]                                           # ties: the closest one
+        self.target = (CX[j], CY[j], CH[j])
+
+
 class B4PSO(Policy):
     """B4: particle swarm over (x, y, altitude, power) every K steps.
     Objective = the env's v2 reward at the candidate."""
@@ -199,7 +219,8 @@ class B5EnergyAware(Policy):
             self.target = (env.x, env.y, BCFG["altitude_m"])             # stay where we are
 
 
-POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware}
+POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
+            "B6": B6GridAltitude}
 
 
 def make_policy(name):
