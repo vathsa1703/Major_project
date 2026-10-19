@@ -29,7 +29,7 @@ OVERRIDE_FLAGS = {"users": "n_users", "clusters": "n_clusters", "mobility": "mob
                   "radius": "cluster_radius_m", "scatter": "scatter_fraction"}
 
 
-def build_policy(name, model_path=None, controls="xy"):
+def build_policy(name, model_path=None, controls="xy", hold=1):
     """A pilot by name: a baseline (B0..), 'random', or 'ppo' (a trained model)."""
     name = ALIASES.get(name, name)
     if name in POLICIES:
@@ -40,7 +40,7 @@ def build_policy(name, model_path=None, controls="xy"):
         if not model_path:
             raise ValueError("--policy ppo needs --model path/to/model.zip")
         from stable_baselines3 import PPO
-        return RLPolicy(PPO.load(model_path, device="cpu"), controls)
+        return RLPolicy(PPO.load(model_path, device="cpu"), controls, hold)
     raise ValueError(f"unknown policy {name!r}; choose from {sorted(POLICIES)} + random, ppo")
 
 
@@ -62,7 +62,9 @@ def main():
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--policy", default="B1")
     ap.add_argument("--model", default=None, help="model.zip for --policy ppo")
-    ap.add_argument("--controls", default="xy", choices=list(CONTROLS), help="which controls the model/random use")
+    ap.add_argument("--controls", default=md.CFG["rl"]["controls"], choices=list(CONTROLS),
+                    help="which controls the model/random use (must match how the model was trained)")
+    ap.add_argument("--hold", type=int, default=md.CFG["rl"]["hold_steps"], help="seconds each decision is held (ppo)")
     ap.add_argument("--profile", default="default", help="default, lowpower, bigarea, hard, rl_static")
     ap.add_argument("--battery_wh", type=float, default=None)
     ap.add_argument("--users", type=int)
@@ -76,7 +78,7 @@ def main():
     a = ap.parse_args()
     md.apply_profile(a.profile)
     overrides = {field: getattr(a, flag) for flag, field in OVERRIDE_FLAGS.items() if getattr(a, flag) is not None}
-    env, frames = run(a.seed, build_policy(a.policy, a.model, a.controls), a.battery_wh, overrides)
+    env, frames = run(a.seed, build_policy(a.policy, a.model, a.controls, a.hold), a.battery_wh, overrides)
 
     L = md.CFG["area_m"]
     rescue = env.rescue

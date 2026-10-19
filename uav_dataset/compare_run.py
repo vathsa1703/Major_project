@@ -33,11 +33,11 @@ def summarize_run(env, frames):
     }
 
 
-def compare(seed, names, model_path=None, controls="xy", overrides=None, battery_wh=None):
+def compare(seed, names, model_path=None, controls="xy", overrides=None, battery_wh=None, hold=1):
     """Run every pilot on the same scenario. Returns {name: (env, frames, summary)}."""
     out = {}
     for n in names:
-        env, frames = run(seed, build_policy(n, model_path, controls), battery_wh, overrides)
+        env, frames = run(seed, build_policy(n, model_path, controls, hold), battery_wh, overrides)
         out[n] = (env, frames, summarize_run(env, frames))
     return out
 
@@ -90,7 +90,8 @@ def main():
     ap.add_argument("--seed", type=int, default=5)
     ap.add_argument("--policies", default="B0,B2,B3,B4", help="comma list of B0..B6, random, ppo")
     ap.add_argument("--model", default=None)
-    ap.add_argument("--controls", default="xy", choices=list(CONTROLS))
+    ap.add_argument("--controls", default=md.CFG["rl"]["controls"], choices=list(CONTROLS))
+    ap.add_argument("--hold", type=int, default=md.CFG["rl"]["hold_steps"], help="seconds each decision is held (ppo)")
     ap.add_argument("--profile", default="default")
     ap.add_argument("--battery_wh", type=float, default=None)
     ap.add_argument("--users", type=int)
@@ -104,7 +105,7 @@ def main():
     a = ap.parse_args()
     md.apply_profile(a.profile)
     overrides = {field: getattr(a, flag) for flag, field in OVERRIDE_FLAGS.items() if getattr(a, flag) is not None}
-    results = compare(a.seed, a.policies.split(","), a.model, a.controls, overrides, a.battery_wh)
+    results = compare(a.seed, a.policies.split(","), a.model, a.controls, overrides, a.battery_wh, a.hold)
     env0 = results[next(iter(results))][0]
     title = (f"Scenario seed {a.seed}, profile {a.profile}: {env0.sc['n_users']} users, "
              f"{env0.sc['n_clusters']} crowds, movement '{env0.sc['mobility']}', {len(env0.boxes)} obstacles, "
