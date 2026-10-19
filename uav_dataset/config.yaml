@@ -134,6 +134,14 @@ profiles:
     mobility: {choices: [static]}
     energy: {battery_wh: 16}
     baselines: {grid_n: 14}
+  rl_static_g20:                 # same scenarios as rl_static, but the agent's map is 20 x 20 instead of 10 x 10
+    area_m: 2000
+    uav: {p_max_dbm: 20}
+    obstacles: {n_range: [3, 8], size_range_m: [60, 200]}
+    mobility: {choices: [static]}
+    energy: {battery_wh: 16}
+    baselines: {grid_n: 14}
+    env: {grid: 20}
   hard:                          # everything at once, plus dynamic-only mobility models and a battery that can last
     area_m: 2000
     uav: {p_max_dbm: 20}

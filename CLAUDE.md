@@ -36,6 +36,9 @@ Only `uav_dataset/` exists: a single-UAV dataset generator + Gymnasium env (`uav
 - NOT done: MATLAB parity (G1); k-means / QoS-aware pairing, optimized power split, imperfect SIC (a real SIC failure only appears there, since roles are set by gain), BER.
 - Known gaps: `energy_j_per_step` is constant hover power (168.5 J); `sweep_one` loops in Python over drone positions; no `demand` field per user yet.
 
+## Roadmap (full version in `docs/roadmap.md`, agreed with the owner on 2026-10-19)
+A close G4 (stop rule) -> B NOMA becomes a decision (OMA switch, power split, pairing) -> C dynamic scenarios and events (moving crowds, rising flood, evacuation, aftershock, drone failure) -> D realism upgrades (agent does not know where people are, a real place such as a Nepal flood, wind/GPS/delay noise, backhaul, safety layer, a real measurement) -> E evaluation and write-up -> F LAST: a simulated quadcopter with a real autopilot model flying under our controller, no hardware. Business track in parallel.
+
 ## Ideas backlog (parked by the owner on 2026-10-19: finish the planned gates first)
 - **Dynamic events** (no new libraries): rising flood that pushes people to higher ground, shelter evacuation, aftershock that adds
   collapsed buildings mid-scenario, survivors appearing or disappearing, drone failure. These are where adaptive control should beat a
@@ -64,6 +67,7 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
 - Every physical parameter needs value, unit, source (paper) or "engineering assumption", and a sensitivity range. Take Al-Hourani and Zeng-Xu-Zhang values from the papers and cite them. Do not invent.
 - Results only from committed configs + seeds. RL: at least 5 seeds, mean +/- 95% CI, paired comparisons, report negative results.
 - Tests required for physics changes. Parity tests must stay green once they exist.
+- **The AI learns by itself** (owner's rule, 2026-10-19): it gets raw measurements and the coverage reward only. No hints, no menu of candidate spots, no imitation of the baselines, no privileged information. Allowed: network design, training length, hyperparameters, seeds, curriculum order. Stopping rule for G4 tuning: `docs/rl_g4.md` / the approved plan.
 
 ## Working agreements
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
