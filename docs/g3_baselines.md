@@ -134,9 +134,8 @@ engineering choices. The runs are saved by `python run_baselines.py --profile <n
    gap in `hard` comes from the combination: bigger map, weaker transmitter, more obstacles and sudden crowd movement.
 3. **Ranking in `hard`:** B4 0.740 > B3 = B5 0.675 > B2 0.633 = B1 0.627 >> B0 0.428. B1 and B2 are not significantly different from each
    other. B3 and B5 are the same policy here (B5's energy cost is clamped at 0, see above).
-4. **Caution about B4's lead.** B4 searches altitude and power as well as position, while B0 to B3 and B5 keep an untuned 150 m altitude
-   and full power. Part of B4's 6.5-point lead over B3 may be altitude choice and not smarter placement. Before drawing any conclusion about
-   RL, add a stronger grid-search baseline that also searches altitude.
+4. **B4's lead over B3 is altitude choice, not placement.** B4 searches altitude and power while B0 to B3 and B5 keep an untuned 150 m.
+   The B6 run below (grid search plus altitude) ties B4, so the real bar for RL is 0.74.
 5. **The bar for RL in `hard` is 0.740 (B4)**, not B0's 0.428.
 6. `hotspot_jump` is the hardest model for every policy (B4 0.699), and `attraction` the easiest (B4 0.770).
 
@@ -246,3 +245,56 @@ Mean coverage_full by mobility model (scenario counts: group_drift 14, hotspot_j
 | hotspot_jump | 0.529 | 0.610 | 0.641 | 0.625 | 0.598 | 0.625 |
 | random_waypoint | 0.532 | 0.582 | 0.613 | 0.616 | 0.599 | 0.616 |
 | surge | 0.549 | 0.602 | 0.658 | 0.612 | 0.589 | 0.615 |
+
+---
+
+# B6: grid search that also searches altitude (profile `hard`)
+
+B4's lead over B3 raised a question: is it smarter placement, or just that B4 can choose altitude and power while B3 is
+stuck at an untuned 150 m? B6 is B3 plus an altitude search (5 levels: 50, 100, 150, 200, 300 m, full power) to find out.
+Reproduce: `python run_baselines.py --profile hard --tag _hard_b6` (7 policies, 100 scenarios, about 30 minutes).
+
+**Result: B6 0.741 and B4 0.740, a tie** (paired difference +0.000). B6 beats B3 by +0.066 (CI excludes 0).
+1. **B4's lead over B3 was altitude choice, not placement.** The same grid placement logic gains 6.6 points once it may pick
+   an altitude. Two very different searches (exhaustive grid at 5 altitudes, and a particle swarm) land on the same score.
+2. **The strongest baseline to beat in `hard` is 0.74** (B4 and B6 tie), not 0.675.
+3. **Both are one-step greedy.** They pick the best spot for the users' *current* positions and cannot anticipate where the
+   crowd is heading. That is the one thing RL could add. How much headroom remains above 0.74 is unknown.
+4. Fixed altitude is a big handicap: B0 to B3 and B5 should be read as "altitude not optimised", not "weak placement".
+
+## Results: profile `hard`, all 7 policies (100 scenarios)
+
+Profile: hard. Area 2000 m, max power 20 dBm, battery 16 Wh, horizon 300 s.
+
+Scenarios per policy: 100. Values are mean +/- 95% CI over scenarios.
+
+| Policy | coverage_full | coverage_alive | survived the horizon | served-user-s per Wh | rescue outage | fairness |
+|---|---|---|---|---|---|---|
+| B0 | 0.428 +/- 0.042 | 0.428 +/- 0.042 | 100% | 4207.4 +/- 664.6 | 0.846 +/- 0.034 | 0.504 +/- 0.041 |
+| B1 | 0.627 +/- 0.027 | 0.627 +/- 0.027 | 100% | 7157.9 +/- 870.4 | 0.535 +/- 0.031 | 0.538 +/- 0.021 |
+| B2 | 0.633 +/- 0.027 | 0.633 +/- 0.027 | 100% | 7575.5 +/- 901.2 | 0.524 +/- 0.031 | 0.562 +/- 0.019 |
+| B3 | 0.675 +/- 0.025 | 0.675 +/- 0.025 | 100% | 7680.0 +/- 901.9 | 0.506 +/- 0.029 | 0.592 +/- 0.018 |
+| B4 | 0.740 +/- 0.023 | 0.740 +/- 0.023 | 100% | 8079.1 +/- 936.5 | 0.417 +/- 0.036 | 0.709 +/- 0.017 |
+| B5 | 0.675 +/- 0.025 | 0.675 +/- 0.025 | 100% | 7680.6 +/- 903.0 | 0.505 +/- 0.029 | 0.593 +/- 0.018 |
+| B6 | 0.741 +/- 0.023 | 0.741 +/- 0.023 | 100% | 8004.4 +/- 926.0 | 0.419 +/- 0.038 | 0.715 +/- 0.017 |
+
+Paired difference in coverage_full (row minus column; positive = row is better; * = the 95% CI excludes 0):
+
+| | B0 | B1 | B2 | B3 | B4 | B5 | B6 |
+|---|---|---|---|---|---|---|---|
+| B0 | - | -0.199* | -0.205* | -0.247* | -0.312* | -0.247* | -0.313* |
+| B1 | +0.199* | - | -0.006 | -0.048* | -0.114* | -0.048* | -0.114* |
+| B2 | +0.205* | +0.006 | - | -0.042* | -0.108* | -0.042* | -0.108* |
+| B3 | +0.247* | +0.048* | +0.042* | - | -0.065* | +0.000 | -0.066* |
+| B4 | +0.312* | +0.114* | +0.108* | +0.065* | - | +0.066* | -0.000 |
+| B5 | +0.247* | +0.048* | +0.042* | -0.000 | -0.066* | - | -0.066* |
+| B6 | +0.313* | +0.114* | +0.108* | +0.066* | +0.000 | +0.066* | - |
+
+Mean coverage_full by mobility model (scenario counts: attraction 27, surge 25, group_drift 25, hotspot_jump 23):
+
+| mobility | B0 | B1 | B2 | B3 | B4 | B5 | B6 |
+|---|---|---|---|---|---|---|---|
+| attraction | 0.482 | 0.665 | 0.664 | 0.700 | 0.770 | 0.700 | 0.769 |
+| group_drift | 0.419 | 0.646 | 0.652 | 0.701 | 0.760 | 0.701 | 0.757 |
+| hotspot_jump | 0.376 | 0.575 | 0.577 | 0.625 | 0.699 | 0.624 | 0.700 |
+| surge | 0.427 | 0.615 | 0.630 | 0.667 | 0.727 | 0.667 | 0.730 |
