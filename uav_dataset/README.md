@@ -13,7 +13,10 @@ Read `../CLAUDE.md` first for the project rules, hypotheses (H1-H4) and gates.
     python -m pytest                  # 52 tests
     python altitude_by_class.py 20    # Gate G2 diagnostic: best altitude per user class
     python mobility_check.py 30 10    # H1 check: fixed drone vs oracle-best position (30 scenarios, 10 dBm)
-    python view_run.py --seed 3 --policy follow   # watch one episode (saves data/run.gif)
+    python view_run.py --seed 5 --profile hard --policy B3     # watch any scenario with any pilot (data/run.gif)
+    python view_run.py --seed 9 --users 600 --clusters 4 --mobility surge --obstacles 6 --policy B2   # your own
+    python run_baselines.py --profile hard                    # compare all baselines (Gate G3)
+    pip install -r ../requirements-rl.txt && python rl_train.py   # train PPO (config: rl:), then rl_eval.py
 
 All settings are in `config.yaml`. Change values there, never in the code. One config per dataset version.
 `data/` is not in git: regenerate it. Splits are by seed and must never mix: train 0-99, val 100-119, test 120-139.

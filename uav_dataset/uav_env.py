@@ -26,8 +26,14 @@ CFG = md.CFG
 class UAVEnv(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(self, reward=None, fading=None, battery_wh=None):
+    def __init__(self, reward=None, fading=None, battery_wh=None, scenario_seeds=None, scenario_overrides=None):
+        """scenario_seeds: if given, reset() without an explicit scenario_seed draws the scenario from this pool
+        (used for training, so the agent only ever sees the training seeds)."""
+        # scenario_overrides: e.g. {"n_users": 500, "n_clusters": 4, "mobility": "surge", "n_obstacles": 6} replaces
+        # those fields of every scenario the seed would produce (to try your own situation)
         super().__init__()
+        self.scenario_overrides = dict(scenario_overrides or {})
+        self.scenario_pool = None if scenario_seeds is None else [int(s) for s in scenario_seeds]
         self.L = CFG["area_m"]
         self.T = CFG["mobility"]["episode_steps"]
         self.dt = CFG["energy"]["dt_s"]
@@ -46,10 +52,16 @@ class UAVEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         ss = (options or {}).get("scenario_seed")
+        if ss is None and self.scenario_pool is not None:
+            ss = self.scenario_pool[int(self.np_random.integers(len(self.scenario_pool)))]
         if ss is None:
             ss = seed if seed is not None else int(self.np_random.integers(0, 2**31 - 1))
         self.scenario_seed = int(ss)
         self.sc = md.make_scenario(self.scenario_seed)
+        self.sc.update(self.scenario_overrides)
+        if "n_users" in self.scenario_overrides:
+            assert self.sc["n_users"] % 2 == 0, "n_users must be even (NOMA pairs)"
+            self.sc["bandwidth_hz"] = self.sc["n_users"] * CFG["bandwidth_per_user_hz"]
         self.users = md.make_users(self.scenario_seed, self.sc)
         self.boxes = md.obstacle_array(md.make_obstacles(self.scenario_seed, self.sc))
         self.P, self.V = md.simulate_positions(self.scenario_seed, self.sc, self.users)   # (T+1, n, 2)
@@ -65,6 +77,10 @@ class UAVEnv(gym.Env):
         self.served_user_s = 0.0
         self.prev = dict(coverage=0.0, throughput=0.0, fairness=0.0)
         return self._obs(), self._info(None)
+
+    def observation(self):
+        """The current observation (what the agent sees)."""
+        return self._obs()
 
     def user_xy(self, t=None):
         return self.P[self.t if t is None else t]
@@ -113,14 +129,16 @@ class UAVEnv(gym.Env):
         self.energy_used_j += e_step
         self.served_user_s += float(served.sum()) * self.dt
 
-        reward = coverage
+        energy_term = 0.0
         if self.reward_version == "v2":
-            reward -= CFG["env"]["lambda_energy"] * e_step / self.hover_step_j
+            energy_term = -CFG["env"]["lambda_energy"] * e_step / self.hover_step_j
         terminated = self.energy_left_j <= 0.0
-        if terminated:
-            reward -= CFG["env"]["terminal_penalty"] * (1.0 - coverage)
+        terminal_term = -CFG["env"]["terminal_penalty"] * (1.0 - coverage) if terminated else 0.0
+        reward = coverage + energy_term + terminal_term
         truncated = (not terminated) and self.t >= self.T
         info = self._info(served, rate=rate, energy_step_j=e_step, p_tx_w=p_w)
+        # each reward part is reported separately, so reward hacking can be spotted
+        info.update(reward_coverage=coverage, reward_energy=energy_term, reward_terminal=terminal_term)
         return self._obs(), float(reward), bool(terminated), bool(truncated), info
 
     # ------------------------------------------------------------------ helpers

@@ -126,6 +126,13 @@ profiles:
     uav: {p_max_dbm: 20}
   bigarea:                       # 2 x 2 km (the plan's out-of-distribution size): the centre no longer covers everyone
     area_m: 2000
+  rl_static:                     # RL curriculum step 1: as hard as `hard`, but the crowd stands still
+    area_m: 2000
+    uav: {p_max_dbm: 20}
+    obstacles: {n_range: [3, 8], size_range_m: [60, 200]}
+    mobility: {choices: [static]}
+    energy: {battery_wh: 16}
+    baselines: {grid_n: 14}
   hard:                          # everything at once, plus dynamic-only mobility models and a battery that can last
     area_m: 2000
     uav: {p_max_dbm: 20}
@@ -133,3 +140,28 @@ profiles:
     mobility: {choices: [hotspot_jump, surge, group_drift, attraction]}
     energy: {battery_wh: 16}
     baselines: {grid_n: 14}      # keep the grid spacing about the same on the bigger map
+
+# Reinforcement learning (Gate G4). Train on the training seeds only; pick models on val; touch test once at the end.
+rl:
+  algo: PPO
+  profile: rl_static             # which scenario profile to train on
+  controls: xy                   # curriculum: xy (move only) -> xyz (+ altitude) -> xyzp (+ power)
+  reward: v1                     # v1 = coverage only; v2 adds the energy cost (curriculum step 5)
+  seed: 0
+  total_timesteps: 300000
+  n_envs: 4
+  n_steps: 512                   # steps per env per update
+  batch_size: 256
+  n_epochs: 10
+  learning_rate: 0.0003
+  gamma: 0.995                   # long horizon (300 steps)
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.0
+  net_arch: [64, 64]
+  log_std_init: -1.0             # start with action noise of about 0.37 (SB3 default 0 = 1.0, too noisy here)
+  norm_reward: true              # scale rewards (returns are ~150): standard for PPO value learning
+  val_eval_every_steps: 100000   # print a deterministic score on the first val scenarios during training
+  val_eval_scenarios: 8
+  checkpoint_every_steps: 50000
+  out_dir: results/rl

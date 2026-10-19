@@ -1,0 +1,5 @@
+# Only needed to TRAIN or evaluate RL agents (large download). The simulator, baselines and tests do not need it.
+-r requirements.txt
+stable-baselines3
+torch
+tensorboard
