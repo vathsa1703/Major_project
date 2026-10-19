@@ -12,6 +12,8 @@ Outputs go to ./data/
     users_preview.png   look at this first
     altitude_check.png  coverage vs altitude (an optimum must appear)
 """
+import copy
+import os
 import sys
 from pathlib import Path
 
@@ -25,6 +27,27 @@ import yaml
 
 HERE = Path(__file__).parent
 CFG = yaml.safe_load(open(HERE / "config.yaml"))
+BASE_CFG = copy.deepcopy(CFG)          # untouched copy, so a profile can be switched off again
+
+
+def deep_update(dst, src):
+    """Merge src into dst IN PLACE, so every module holding a reference to a nested dict sees the change."""
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            deep_update(dst[k], v)
+        else:
+            dst[k] = copy.deepcopy(v)
+
+
+def apply_profile(name):
+    """Switch to a named profile from config.yaml `profiles:` (None or 'default' = the base config)."""
+    deep_update(CFG, copy.deepcopy(BASE_CFG))                       # always start from the base
+    if name and name != "default":
+        deep_update(CFG, CFG["profiles"][name])
+    CFG["active_profile"] = name or "default"
+
+
+apply_profile(os.environ.get("UAV_PROFILE"))                        # lets worker processes inherit the profile
 OUT = HERE / "data"
 OUT.mkdir(exist_ok=True)
 C = 3e8

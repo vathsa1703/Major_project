@@ -110,3 +110,139 @@ Mean coverage_full by mobility model (scenario counts: group_drift 23, surge 22,
 | hotspot_jump    | 0.889 | 0.88  | 0.884 | 0.905 | 0.911 | 0.905 |
 | random_waypoint | 0.89  | 0.888 | 0.887 | 0.909 | 0.915 | 0.909 |
 | surge           | 0.882 | 0.895 | 0.897 | 0.914 | 0.918 | 0.914 |
+
+---
+
+# Harder scenarios (profiles)
+
+In the default scenarios a fixed drone already covers 88% of users, so there is little to gain. Profiles in `config.yaml`
+(`profiles:`, selected with `--profile`) change the settings without touching the default dataset. All values are
+engineering choices. The runs are saved by `python run_baselines.py --profile <name>`.
+
+| Profile | What changes | Scenarios | Battery |
+|---|---|---|---|
+| `lowpower` | max transmit power 20 dBm (default 30) | 50 | 10 Wh |
+| `bigarea` | 2 x 2 km map (default 1 x 1 km) | 50 | 10 Wh |
+| `hard` | 2 x 2 km, 20 dBm, 3 to 8 obstacles (60 to 200 m), only the dynamic mobility models (hotspot jump, surge, group drift, attraction), grid 14 x 14 | 100 | 16 Wh |
+
+## What the numbers say
+1. **`hard` removes the headroom problem.** Every policy survives (16 Wh), the fixed drone B0 falls to **0.428**
+   (0.882 in the default scenarios), and the best baseline B4 reaches **0.740**. That is a 31-point gap against 3 points before.
+   Every paired difference against B0 is significant (the 95% CI excludes 0). **Adaptive control beats a fixed drone here (H1).**
+2. **No single change does it.** With the 10 Wh battery the `lowpower` and `bigarea` runs are dominated by survival time, so compare
+   `coverage_alive`: B0 to B4 is 0.796 to 0.880 (`lowpower`) and 0.765 to 0.876 (`bigarea`), gaps of 8 and 11 points. The 31-point
+   gap in `hard` comes from the combination: bigger map, weaker transmitter, more obstacles and sudden crowd movement.
+3. **Ranking in `hard`:** B4 0.740 > B3 = B5 0.675 > B2 0.633 = B1 0.627 >> B0 0.428. B1 and B2 are not significantly different from each
+   other. B3 and B5 are the same policy here (B5's energy cost is clamped at 0, see above).
+4. **Caution about B4's lead.** B4 searches altitude and power as well as position, while B0 to B3 and B5 keep an untuned 150 m altitude
+   and full power. Part of B4's 6.5-point lead over B3 may be altitude choice and not smarter placement. Before drawing any conclusion about
+   RL, add a stronger grid-search baseline that also searches altitude.
+5. **The bar for RL in `hard` is 0.740 (B4)**, not B0's 0.428.
+6. `hotspot_jump` is the hardest model for every policy (B4 0.699), and `attraction` the easiest (B4 0.770).
+
+## Results: profile `hard` (100 scenarios)
+
+Profile: hard. Area 2000 m, max power 20 dBm, battery 16 Wh, horizon 300 s.
+
+Scenarios per policy: 100. Values are mean +/- 95% CI over scenarios.
+
+| Policy | coverage_full | coverage_alive | survived the horizon | served-user-s per Wh | rescue outage | fairness |
+|---|---|---|---|---|---|---|
+| B0 | 0.428 +/- 0.042 | 0.428 +/- 0.042 | 100% | 4207.4 +/- 664.6 | 0.846 +/- 0.034 | 0.504 +/- 0.041 |
+| B1 | 0.627 +/- 0.027 | 0.627 +/- 0.027 | 100% | 7157.9 +/- 870.4 | 0.535 +/- 0.031 | 0.538 +/- 0.021 |
+| B2 | 0.633 +/- 0.027 | 0.633 +/- 0.027 | 100% | 7575.5 +/- 901.2 | 0.524 +/- 0.031 | 0.562 +/- 0.019 |
+| B3 | 0.675 +/- 0.025 | 0.675 +/- 0.025 | 100% | 7680.0 +/- 901.9 | 0.506 +/- 0.029 | 0.592 +/- 0.018 |
+| B4 | 0.740 +/- 0.023 | 0.740 +/- 0.023 | 100% | 8079.1 +/- 936.5 | 0.417 +/- 0.036 | 0.709 +/- 0.017 |
+| B5 | 0.675 +/- 0.025 | 0.675 +/- 0.025 | 100% | 7680.6 +/- 903.0 | 0.505 +/- 0.029 | 0.593 +/- 0.018 |
+
+Paired difference in coverage_full (row minus column; positive = row is better; * = the 95% CI excludes 0):
+
+| | B0 | B1 | B2 | B3 | B4 | B5 |
+|---|---|---|---|---|---|---|
+| B0 | - | -0.199* | -0.205* | -0.247* | -0.312* | -0.247* |
+| B1 | +0.199* | - | -0.006 | -0.048* | -0.114* | -0.048* |
+| B2 | +0.205* | +0.006 | - | -0.042* | -0.108* | -0.042* |
+| B3 | +0.247* | +0.048* | +0.042* | - | -0.065* | +0.000 |
+| B4 | +0.312* | +0.114* | +0.108* | +0.065* | - | +0.066* |
+| B5 | +0.247* | +0.048* | +0.042* | -0.000 | -0.066* | - |
+
+Mean coverage_full by mobility model (scenario counts: attraction 27, surge 25, group_drift 25, hotspot_jump 23):
+
+| mobility | B0 | B1 | B2 | B3 | B4 | B5 |
+|---|---|---|---|---|---|---|
+| attraction | 0.482 | 0.665 | 0.664 | 0.700 | 0.770 | 0.700 |
+| group_drift | 0.419 | 0.646 | 0.652 | 0.701 | 0.760 | 0.701 |
+| hotspot_jump | 0.376 | 0.575 | 0.577 | 0.625 | 0.699 | 0.624 |
+| surge | 0.427 | 0.615 | 0.630 | 0.667 | 0.727 | 0.667 |
+
+## Results: profile `lowpower` (50 scenarios)
+
+Profile: lowpower. Area 1000 m, max power 20 dBm, battery 10 Wh, horizon 300 s.
+
+Scenarios per policy: 50. Values are mean +/- 95% CI over scenarios.
+
+| Policy | coverage_full | coverage_alive | survived the horizon | served-user-s per Wh | rescue outage | fairness |
+|---|---|---|---|---|---|---|
+| B0 | 0.552 +/- 0.023 | 0.796 +/- 0.032 | 0% | 8699.8 +/- 1464.1 | 0.354 +/- 0.079 | 0.746 +/- 0.017 |
+| B1 | 0.581 +/- 0.017 | 0.817 +/- 0.023 | 0% | 9403.9 +/- 1612.2 | 0.313 +/- 0.049 | 0.690 +/- 0.018 |
+| B2 | 0.617 +/- 0.018 | 0.826 +/- 0.022 | 0% | 9948.8 +/- 1701.0 | 0.298 +/- 0.048 | 0.704 +/- 0.014 |
+| B3 | 0.616 +/- 0.014 | 0.859 +/- 0.019 | 0% | 9986.7 +/- 1694.2 | 0.221 +/- 0.048 | 0.742 +/- 0.012 |
+| B4 | 0.582 +/- 0.010 | 0.880 +/- 0.015 | 0% | 9548.8 +/- 1633.6 | 0.125 +/- 0.038 | 0.818 +/- 0.011 |
+| B5 | 0.617 +/- 0.014 | 0.859 +/- 0.019 | 0% | 9990.6 +/- 1694.4 | 0.221 +/- 0.048 | 0.742 +/- 0.012 |
+
+Paired difference in coverage_full (row minus column; positive = row is better; * = the 95% CI excludes 0):
+
+| | B0 | B1 | B2 | B3 | B4 | B5 |
+|---|---|---|---|---|---|---|
+| B0 | - | -0.030* | -0.065* | -0.065* | -0.031* | -0.065* |
+| B1 | +0.030* | - | -0.036* | -0.035* | -0.001 | -0.035* |
+| B2 | +0.065* | +0.036* | - | +0.000 | +0.035* | +0.000 |
+| B3 | +0.065* | +0.035* | -0.000 | - | +0.034* | -0.000 |
+| B4 | +0.031* | +0.001 | -0.035* | -0.034* | - | -0.034* |
+| B5 | +0.065* | +0.035* | -0.000 | +0.000 | +0.034* | - |
+
+Mean coverage_full by mobility model (scenario counts: group_drift 14, hotspot_jump 11, random_waypoint 10, surge 8, attraction 7):
+
+| mobility | B0 | B1 | B2 | B3 | B4 | B5 |
+|---|---|---|---|---|---|---|
+| attraction | 0.556 | 0.597 | 0.639 | 0.634 | 0.590 | 0.636 |
+| group_drift | 0.531 | 0.532 | 0.582 | 0.585 | 0.563 | 0.585 |
+| hotspot_jump | 0.571 | 0.607 | 0.626 | 0.629 | 0.592 | 0.629 |
+| random_waypoint | 0.578 | 0.590 | 0.623 | 0.626 | 0.587 | 0.625 |
+| surge | 0.525 | 0.607 | 0.638 | 0.626 | 0.589 | 0.626 |
+
+## Results: profile `bigarea` (50 scenarios)
+
+Profile: bigarea. Area 2000 m, max power 30 dBm, battery 10 Wh, horizon 300 s.
+
+Scenarios per policy: 50. Values are mean +/- 95% CI over scenarios.
+
+| Policy | coverage_full | coverage_alive | survived the horizon | served-user-s per Wh | rescue outage | fairness |
+|---|---|---|---|---|---|---|
+| B0 | 0.522 +/- 0.018 | 0.765 +/- 0.027 | 0% | 8298.9 +/- 1384.0 | 0.497 +/- 0.099 | 0.730 +/- 0.031 |
+| B1 | 0.582 +/- 0.016 | 0.812 +/- 0.022 | 0% | 9420.7 +/- 1610.3 | 0.375 +/- 0.057 | 0.622 +/- 0.017 |
+| B2 | 0.627 +/- 0.017 | 0.821 +/- 0.021 | 0% | 10135.2 +/- 1732.4 | 0.357 +/- 0.055 | 0.649 +/- 0.014 |
+| B3 | 0.603 +/- 0.014 | 0.845 +/- 0.019 | 0% | 9786.4 +/- 1665.5 | 0.306 +/- 0.060 | 0.675 +/- 0.017 |
+| B4 | 0.589 +/- 0.010 | 0.876 +/- 0.013 | 0% | 9639.5 +/- 1647.1 | 0.209 +/- 0.046 | 0.746 +/- 0.013 |
+| B5 | 0.604 +/- 0.014 | 0.844 +/- 0.019 | 0% | 9788.0 +/- 1665.7 | 0.307 +/- 0.060 | 0.675 +/- 0.017 |
+
+Paired difference in coverage_full (row minus column; positive = row is better; * = the 95% CI excludes 0):
+
+| | B0 | B1 | B2 | B3 | B4 | B5 |
+|---|---|---|---|---|---|---|
+| B0 | - | -0.060* | -0.104* | -0.081* | -0.066* | -0.081* |
+| B1 | +0.060* | - | -0.044* | -0.021* | -0.006 | -0.021* |
+| B2 | +0.104* | +0.044* | - | +0.023* | +0.038* | +0.023* |
+| B3 | +0.081* | +0.021* | -0.023* | - | +0.015* | -0.000 |
+| B4 | +0.066* | +0.006 | -0.038* | -0.015* | - | -0.015* |
+| B5 | +0.081* | +0.021* | -0.023* | +0.000 | +0.015* | - |
+
+Mean coverage_full by mobility model (scenario counts: group_drift 14, hotspot_jump 11, random_waypoint 10, surge 8, attraction 7):
+
+| mobility | B0 | B1 | B2 | B3 | B4 | B5 |
+|---|---|---|---|---|---|---|
+| attraction | 0.527 | 0.599 | 0.645 | 0.615 | 0.600 | 0.613 |
+| group_drift | 0.493 | 0.541 | 0.598 | 0.567 | 0.568 | 0.567 |
+| hotspot_jump | 0.529 | 0.610 | 0.641 | 0.625 | 0.598 | 0.625 |
+| random_waypoint | 0.532 | 0.582 | 0.613 | 0.616 | 0.599 | 0.616 |
+| surge | 0.549 | 0.602 | 0.658 | 0.612 | 0.589 | 0.615 |

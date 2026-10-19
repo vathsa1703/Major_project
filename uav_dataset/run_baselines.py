@@ -97,14 +97,27 @@ def summarize(df):
     return "\n".join(lines)
 
 
+def report(df, profile, battery_wh=None):
+    """The full summary text: a header naming the settings, then the comparison tables."""
+    bat = battery_wh if battery_wh is not None else md.CFG["energy"]["battery_wh"]
+    head = (f"Profile: {profile}. Area {md.CFG['area_m']:g} m, max power {md.CFG['uav']['p_max_dbm']:g} dBm, "
+            f"battery {bat:g} Wh, horizon {md.CFG['mobility']['episode_steps']} s.")
+    return head + "\n\n" + summarize(df)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=None, help="use only the first N eval seeds")
     ap.add_argument("--policies", default=",".join(POLICIES))
     ap.add_argument("--battery_wh", type=float, default=None, help="override energy.battery_wh")
-    ap.add_argument("--tag", default="", help="suffix for the output files")
+    ap.add_argument("--tag", default=None, help="suffix for the output files (default: _<profile>)")
+    ap.add_argument("--profile", default="default", help="config profile: default, lowpower, bigarea, hard")
     ap.add_argument("--workers", type=int, default=min(4, os.cpu_count() or 1))
     a = ap.parse_args()
+    os.environ["UAV_PROFILE"] = a.profile          # worker processes read this at import
+    md.apply_profile(a.profile)
+    if a.tag is None:
+        a.tag = "" if a.profile == "default" else f"_{a.profile}"
     lo, hi = md.CFG["baselines"]["eval_seeds"]
     seeds = list(range(lo, hi + 1))[: a.seeds]
     tasks = [(n, s, a.battery_wh) for n in a.policies.split(",") for s in seeds]
@@ -118,10 +131,7 @@ def main():
     df = pd.DataFrame(rows)
     RESULTS.mkdir(exist_ok=True)
     df.to_csv(RESULTS / f"baselines_episodes{a.tag}.csv", index=False)
-    text = summarize(df)
-    bat = a.battery_wh if a.battery_wh is not None else md.CFG["energy"]["battery_wh"]
-    horizon = md.CFG["mobility"]["episode_steps"]
-    text = f"Battery: {bat:g} Wh, horizon {horizon} s.\n\n" + text
+    text = report(df, a.profile, a.battery_wh)
     (RESULTS / f"baselines_summary{a.tag}.md").write_text(text, encoding="utf-8")
     print("\n" + text)
 
