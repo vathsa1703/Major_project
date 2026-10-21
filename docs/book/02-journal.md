@@ -387,3 +387,39 @@ learning. The AI is behind even on scenarios it trained on (underfitting). The m
 but a 20 x 20 map did not help, and B3's real trick is parking *between* crowds, which the AI never learned. I checked the
 code, reproduced the main number and showed it does not depend on the assumed crowd size (0.588-0.606).
 
+### 46. Owner's decisions, a second review, and two tracks in parallel
+The owner merged PR #10, answered the four questions of Chapter 14.7 (D-38) and asked me to discuss the next designs with
+another agent before building, in case it had a better idea. It did. I gave a reviewer my designs for adaptive NOMA and for a
+better learner; it ran the real code and found three flaws in the NOMA design (D-39) and one in the learner design (a privileged
+critic helps in SAC, hardly in PPO; D-40). I questioned it on speed and training cost; it measured both and we agreed the specs.
+Two agents now build the tracks in parallel, each in its own copy of the repository: Track 1 adaptive NOMA vs equally optimised
+OMA; Track 2 the better learner. The physics default stays as it is while G4 is open (D-41).
+The owner also asked how far the project is from completion: about 55-60% of the core; 5-7 weeks of focused work for the
+research question (tracks 1 and 2, G5 on moving crowds, final evaluation), 10-12 weeks with the extras and the flying sim.
+
+### 47. Track 1 done: adaptive NOMA beats equally optimised OMA
+The Track 1 agent built two new access schemes (`oma_opt`, `noma_opt`) exactly as agreed in D-39, with 45 tests, and ran them
+in the game on 100 scenarios per profile while the AI trained alongside (about 1.5 hours in total on the shared laptop). Result
+(Chapter 13.9): with both schemes optimised the same way, NOMA serves 3-5 more people per 100 for every pilot, with more total
+speed, better fairness and fewer unserved rescue users; B3 on lowpower reaches 98.3% coverage. Imperfect SIC (eps 0.05) halves
+the gain but does not remove it. The catch, for both optimised schemes: much less total speed than the old fixed schemes. I
+checked the work: the old schemes are byte-identical and reproduce the Chapter 13 numbers, 227 tests pass, and I re-derived
+the power formula independently (exact to 1e-15 on 2,000 random pairs).
+
+
+### 48. The GIFs were never on GitHub (found and fixed)
+Building the PDF from a clean copy of the repository showed 22 pictures instead of 26: the 6 GIFs of the book had never been
+committed, because `.gitignore` ignores every `*.gif` (a rule from the start, meant for viewer output). They existed only on the
+owner's laptop. Fixed with an exception for `docs/book/figures/gifs/`; the 6 GIFs (4.7 MB) are now in the repository.
+
+### 49. The owner sets the G4 pass mark, approves the physics fixes, and Track 2 ends
+While the AI trained, two AI runs scored the same 0.573 but one "passed" the old test and one "failed", because 20 scenarios
+give wide error bars. I explained the problem (first too technically; the owner asked again and an exam analogy worked) and the
+owner chose a fixed pass mark **before** the last result: 3-run average at least 0.58 (D-43). A reviewer then found that the game
+lets a drone save 25% battery by shaking back and forth on the spot (no acceleration limit); I reproduced it (0 m moved, 131 J/s
+instead of 174). The owner approved an acceleration limit, run-to-empty as the circling pilot's main measure and a turning-energy
+term (D-44 to D-46). Steps 3 and 5 were built in parallel while the AI trained.
+Track 2 result (Chapter 8.8): best AI 0.576 over 3 runs, 0.004 short of the pass mark and clearly behind B2 on a second unseen set;
+the privileged critic did not help. **G4 not met; stopping rule reached; on to moving crowds.** Merging Track 1 into Track 2 had
+one conflict (both added arguments to `UAVEnv.__init__`), resolved by keeping both; 251 tests pass.
+

@@ -15,15 +15,16 @@ import pandas as pd
 
 import make_dataset as md
 from baselines import POLICIES
-from rl_utils import CONTROLS, RandomPolicy, RLPolicy, model_settings
+from rl_utils import CONTROLS, RandomPolicy, load_policy, model_settings
 from run_baselines import _task, run_episode, summarize
 from uav_env import UAVEnv
 
 HERE = Path(__file__).parent
+MODEL_ROWS = ("PPO", "SAC")          # a row with one of these names plays the trained model (named after its algorithm)
 
 
 def evaluate(names, seeds, model_path=None, controls=None, workers=4, battery_wh=None, hold=None):
-    """Rows (one per policy x seed). Baselines run in parallel processes; Random and PPO run here."""
+    """Rows (one per policy x seed). Baselines run in parallel processes; Random and the model (PPO/SAC) run here."""
     rows = []
     base = [n for n in names if n in POLICIES]
     if base:
@@ -32,11 +33,9 @@ def evaluate(names, seeds, model_path=None, controls=None, workers=4, battery_wh
     for n in names:
         if n == "Random":
             pol = RandomPolicy(controls or md.CFG["rl"]["controls"])
-        elif n == "PPO":
-            from stable_baselines3 import PPO
-            saved = model_settings(model_path)                 # the model's own controls / hold / observation groups
-            pol = RLPolicy(PPO.load(model_path, device="cpu"), controls or saved.get("controls", "xy"),
-                           hold or saved.get("hold_steps", 1), saved.get("obs_groups"))
+        elif n in MODEL_ROWS:
+            # the model's own algorithm (PPO / SAC), controls, hold, observation groups and observation mode
+            pol = load_policy(model_path, controls, hold)
         else:
             continue
         rows += [{"policy": n, **run_episode(UAVEnv(battery_wh=battery_wh), pol, s)} for s in seeds]
@@ -57,7 +56,7 @@ def main():
     a = ap.parse_args()
     os.environ["UAV_PROFILE"] = a.profile
     md.apply_profile(a.profile)
-    names = a.policies.split(",") + (["PPO"] if a.model else [])
+    names = a.policies.split(",") + ([model_settings(a.model).get("algo", "PPO")] if a.model else [])
     seeds = md.seeds(a.split)[: a.seeds]
     df = evaluate(names, seeds, a.model, a.controls, a.workers, hold=a.hold)
     head = (f"Split: {a.split} ({len(seeds)} scenarios, seeds {seeds[0]}-{seeds[-1]}). Profile: {a.profile}. "

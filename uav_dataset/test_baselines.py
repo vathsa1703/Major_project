@@ -234,7 +234,7 @@ def test_b6_targets_stay_inside_the_allowed_space():
 
 
 # ---------------------------------------------------------------- information ladder: B3obs, B3obsU, B3obsUO
-LADDER = ("B3obs", "B3obsU", "B3obsUO")
+LADDER = ("B3obs", "B3obsU", "B3obsUO", "B3obsN", "B3obsUN")
 
 
 def _plan(name, env):
@@ -261,6 +261,23 @@ def test_pseudo_population_has_the_configured_size_and_valid_class_probabilities
     r = list(md.CFG["classes"]).index("rescue")
     assert (probs[:, r] == 1).sum() == round(BCFG["obs_pseudo_users"] * md.CFG["classes"]["rescue"]["share"])
     assert ((0 <= xy) & (xy <= env.L)).all()
+
+
+def test_the_n_rungs_use_the_true_crowd_size_and_nothing_else_changes():
+    from baselines import B3Obs, B3ObsN, B3ObsUncapped, B3ObsUncappedN, pseudo_population
+    env = _env(seed=3, scenario_overrides={"n_users": 300})
+    xy, _ = pseudo_population(env, *B3Obs().maps(env), n=env.sc["n_users"])
+    assert len(xy) == 300
+    assert np.array_equal(B3ObsN().maps(env)[0], B3Obs().maps(env)[0])                 # same capped maps
+    assert np.array_equal(B3ObsUncappedN().maps(env)[0], B3ObsUncapped().maps(env)[0])  # same uncapped maps
+    X, Y, H = np.array([env.x, 100.0, 900.0]), np.array([env.y, 900.0, 100.0]), np.full(3, BCFG["altitude_m"])
+    for cls in (B3ObsN, B3ObsUncappedN):
+        pol = cls()
+        pol.reset(env)
+        before = pol.score(env, X, Y, H, env.p_max_w)
+        env.sc = {**env.sc, "n_users": 1000}                       # told a different crowd size -> different scores
+        assert not np.allclose(pol.score(env, X, Y, H, env.p_max_w), before)
+        env.sc = {**env.sc, "n_users": 300}
 
 
 def test_b3obs_reads_exactly_the_agents_maps():
@@ -292,7 +309,7 @@ def _moved_within_cells(env):
     return cell_centres(env)[ix[:, 0] * env.grid + ix[:, 1]]
 
 
-@pytest.mark.parametrize("name", ["B3obs", "B3obsU"])
+@pytest.mark.parametrize("name", ["B3obs", "B3obsU", "B3obsN", "B3obsUN"])
 def test_ladder_ignores_hidden_information(name):
     for seed in (2, 3, 4):
         env = _env(seed=seed)

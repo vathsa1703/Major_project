@@ -68,6 +68,13 @@ fading:
 noma_alpha_weak: 0.8            # power share of the weak user (strong gets 0.2)
 pairing: extreme                # extreme (strongest with weakest) | random
 
+# QoS-aware access (book 14.6 step 2), used only when env.access is oma_opt or noma_opt (make_dataset.access_rates).
+# Every admitted user gets just its class's min rate at minimum power; the cheapest users are admitted first.
+access:
+  sic_eps: 0.0                  # ENGINEERING ASSUMPTION: imperfect-SIC residual (share of the weak user's power the
+                                # strong user cannot remove); 0 = perfect SIC; sensitivity {0, 0.05}; noma_opt only
+  rescue_first: false           # true = admit rescue users first, then the rest (lexicographic); default off
+
 # sweep of drone positions
 sweep:
   xy_step_m: 100                # 11 x 11 grid on 1000 m (use 50 for a finer 21 x 21)
@@ -101,10 +108,15 @@ uav:
 # Gymnasium env (Phase 5)
 env:
   grid: 10                      # NxN user-density heatmap
-  access: noma                  # noma | oma: how users share the radio (OMA = FDMA, same total bandwidth and power)
+  access: noma                  # noma | oma | oma_opt | noma_opt: how users share the radio (OMA = FDMA, same total
+                                # bandwidth and power); *_opt = QoS-aware minimum-power admission (see `access:`)
   reward: v2                    # v1 = coverage;  v2 = coverage - lambda_E * (energy_step / hover_energy_step)
   lambda_energy: 0.05           # ENGINEERING ASSUMPTION
   terminal_penalty: 1.0         # battery empty: reward -= penalty * share of users left uncovered
+  # opt-in extras (Track 2); the default observation does not use them
+  history_len: 4                # `history` group: the drone's own last 4 (x, y, measured coverage) ...
+  history_every_s: 10           # ... taken every 10 s (training passes the decision rhythm hold_steps)
+  priv_grid: 20                 # critic-only true-state maps (asymmetric critic): priv_grid x priv_grid
 
 # Baselines (Gate G3). B0 fixed, B1 follow the biggest crowd, B2 weighted k-means, B3 grid search, B4 PSO, B5 energy-aware.
 baselines:
@@ -181,3 +193,19 @@ rl:
   val_eval_scenarios: 8
   checkpoint_every_steps: 10000
   out_dir: results/rl
+  # Track 2 (all opt-in; the values below keep the old behaviour)
+  obs_mode: box                  # box = flat vector (old) | dict = maps + scalars as a gymnasium Dict (needed for priv)
+  privileged: false              # SAC only: asymmetric critic. The critic (training only, discarded) also sees the true
+                                 # state (uncapped 20x20 density, rescue, obstacle, demand maps, crowd size); the actor never
+  train_seed_range: null         # null = the training split (0-99); e.g. [10000, 19999] = 10,000 fresh procedural scenarios
+  torch_threads: 2               # the laptop is shared: keep PyTorch to 2 CPU threads
+  sac:                           # used when algo: SAC
+    learning_rate: 0.0003
+    buffer_size: 50000           # decisions; the Dict replay buffer stores obs and next_obs (RAM is tight on this laptop)
+    learning_starts: 2000
+    batch_size: 256
+    tau: 0.005
+    train_freq: 1                # one gradient step per vector-env step (= per n_envs decisions)
+    gradient_steps: 1
+    ent_coef: auto
+    net_arch: [256, 256]

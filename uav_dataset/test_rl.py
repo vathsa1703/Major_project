@@ -373,3 +373,157 @@ def test_old_models_without_hold_in_their_settings_default_to_deciding_every_sec
     (tmp_path / "config.json").write_text(json.dumps(old_config), encoding="utf-8")
     pol = build_policy("ppo", str(tmp_path / "model.zip"))
     assert pol.controls == "xy" and pol.hold == 1 and pol.obs_groups is None
+
+
+# ---------------------------------------------------------------- Track 2: opt-in observation extras, Dict obs, priv
+NEW_GROUPS = ("pos", "vel", "battery", "time", "prev", "crowd_n", "history", "heat_all_u", "heat_rescue_u")
+
+
+def test_default_observation_still_equals_the_old_formula():
+    env = UAVEnv()
+    env.reset(seed=7)
+    for a in np.random.default_rng(2).uniform(-1, 1, (3, 4)):
+        env.step(a)
+    xy, L, u = env.user_xy(), env.L, env.uav
+
+    def capped(p):
+        h, _, _ = np.histogram2d(p[:, 0], p[:, 1], bins=env.grid, range=[[0, L], [0, L]])
+        return np.minimum(1.0, h.ravel() / len(p) * 10.0)
+    old = np.concatenate([[env.x / L, env.y / L, (env.h - u["h_min_m"]) / (u["h_max_m"] - u["h_min_m"])],
+                          [env.vx / u["v_max_mps"], env.vy / u["v_max_mps"], env.vz / u["vz_max_mps"]],
+                          [env.energy_left_j / env.battery_j], [env.t / env.T],
+                          [env.prev["coverage"], env.prev["throughput"], env.prev["fairness"]],
+                          capped(xy), capped(xy[env.rescue])])
+    obs = env.observation()
+    assert obs.dtype == np.float32 and obs.shape == (211,)
+    assert np.array_equal(obs, np.clip(old, -1, 1).astype(np.float32))
+
+
+def test_uncapped_map_is_in_range_never_saturates_and_keeps_the_true_shares():
+    md.apply_profile("rl_static")
+    saturated_somewhere = False
+    for seed in range(100, 108):
+        env = UAVEnv(obs_groups=("heat_all", "heat_all_u"))
+        env.reset(seed=seed)
+        o = env.observation()
+        g2 = env.grid**2
+        capped, unc = o[:g2], o[g2:]
+        saturated_somewhere |= bool((capped >= 1.0).sum() > 1)
+        assert unc.min() >= 0 and unc.max() < 1.0                         # several cells occupied -> never 1
+        assert float((unc.astype(float) ** 2).sum()) == pytest.approx(1.0, abs=1e-5)   # shares add up to 1
+        full = capped >= 1.0                       # cells the capped map cannot tell apart, the uncapped one can
+        if full.sum() > 1:
+            assert len(np.unique(unc[full])) > 1
+    assert saturated_somewhere                                             # the cap really did hide something
+
+
+def test_crowd_n_is_monotone_in_the_number_of_users_and_spans_0_to_1():
+    vals = []
+    for n in (100, 300, 600, 1000):
+        env = UAVEnv(obs_groups=("crowd_n",), scenario_overrides={"n_users": n})
+        env.reset(seed=3)
+        vals.append(float(env.observation()[0]))
+    assert vals[0] == pytest.approx(0.0) and vals[-1] == pytest.approx(1.0)
+    assert all(a < b for a, b in zip(vals, vals[1:], strict=False))
+    env = UAVEnv(obs_groups=("crowd_n",), scenario_overrides={"n_users": 4000})
+    env.reset(seed=3)
+    assert env.observation()[0] == 1.0                                     # outside the range: clipped
+
+
+def test_history_holds_own_position_and_coverage_at_decision_times():
+    from rl_utils import HoldWrapper
+    env = HoldWrapper(ControlWrapper(UAVEnv(battery_wh=1000.0, obs_groups=("history",), history_every=10), "goto"),
+                      10)
+    obs, _ = env.reset(seed=3)
+    e = env.unwrapped
+    assert obs.shape == (12,) and np.allclose(obs, np.tile([0.5, 0.5, 0.0], 4))     # before the start: the start
+    rec = {0: (0.5, 0.5, 0.0)}
+    for k in range(1, 4):
+        obs, *_, info = env.step(np.array([0.6, -0.3], dtype=np.float32))
+        rec[10 * k] = (info["x"] / e.L, info["y"] / e.L, info["coverage"])
+    want = np.array([rec[0], rec[10], rec[20], rec[30]], dtype=np.float32).ravel()
+    assert np.allclose(obs, want, atol=1e-6)
+    assert rec[30][2] > 0 and rec[30][:2] != rec[10][:2]                   # it measured something and moved
+    # a policy asking a plain env (no wrapper) for the same groups at a 10 s rhythm sees the same numbers
+    assert np.allclose(e.observation(("history",), history_every=10), want, atol=1e-6)
+
+
+def test_dict_observation_has_maps_and_scalars_and_passes_the_checker():
+    env = UAVEnv(obs_groups=NEW_GROUPS, obs_mode="dict")
+    obs, _ = env.reset(seed=4)
+    assert set(obs) == {"maps", "scalars"}
+    assert obs["maps"].shape == (2, env.grid, env.grid) and obs["scalars"].shape == (3 + 3 + 1 + 1 + 3 + 1 + 12,)
+    assert env.observation_space.contains(obs)
+    box = UAVEnv(obs_groups=("heat_all_u", "heat_rescue_u"))             # same maps as box mode, in (C, x, y) form
+    box.reset(seed=4)
+    assert np.allclose(obs["maps"].ravel(), box.observation())
+    check_env(env, skip_render_check=True)
+    check_env(make_env("goto", hold=10, obs_groups=NEW_GROUPS, obs_mode="dict", privileged=True).unwrapped,
+              skip_render_check=True)
+
+
+def test_privileged_state_exists_only_when_asked_and_only_in_dict_mode():
+    plain = UAVEnv(obs_groups=NEW_GROUPS, obs_mode="dict")
+    priv = UAVEnv(obs_groups=NEW_GROUPS, obs_mode="dict", privileged=True)
+    assert "priv_maps" not in plain.observation_space.spaces and "priv_maps" in priv.observation_space.spaces
+    o_plain, _ = plain.reset(seed=5)
+    o_priv, _ = priv.reset(seed=5)
+    assert not any(k.startswith("priv") for k in o_plain)
+    assert np.array_equal(o_plain["maps"], o_priv["maps"]) and np.array_equal(o_plain["scalars"], o_priv["scalars"])
+    assert priv.observation(privileged=False).keys() == o_plain.keys()       # a policy can ask without priv
+    with pytest.raises(AssertionError):
+        UAVEnv(privileged=True)                                               # box mode: refused
+
+
+def test_privileged_maps_are_the_raw_true_state():
+    md.apply_profile("rl_static")
+    env = UAVEnv(obs_groups=NEW_GROUPS, obs_mode="dict", privileged=True)
+    obs, _ = env.reset(seed=104)
+    p = env.priv_grid
+    pm = obs["priv_maps"].astype(float) / 255
+    assert obs["priv_maps"].dtype == np.uint8 and pm.shape == (4, p, p)
+    xy = env.user_xy()
+    h, _, _ = np.histogram2d(xy[:, 0], xy[:, 1], bins=p, range=[[0, env.L], [0, env.L]])
+    assert np.allclose(pm[0], np.sqrt(h / len(xy)), atol=1 / 255)             # density, uncapped
+    assert len(env.boxes) > 0 and pm[2].max() > 0.5 and pm[2].min() == 0     # obstacle occupancy
+    area = sum((b[2] - b[0]) * (b[3] - b[1]) for b in env.boxes) / env.L**2
+    assert 0.5 * area < pm[2].mean() <= area + 0.005                          # overlapping buildings count once
+    assert 0 < pm[3].max() <= 1 and (pm[3][h == 0] == 0).all()                 # demand only where people are
+    assert obs["priv_n"][0] == pytest.approx(env.crowd_n())
+
+
+def test_fresh_training_pool_is_disjoint_from_validation_and_test():
+    from rl_utils import train_seeds, training_pool
+    assert training_pool(None) == train_seeds()
+    pool = training_pool([10000, 19999])
+    assert len(pool) == 10000 and pool[0] == 10000
+    assert set(pool).isdisjoint(md.seeds("val")) and set(pool).isdisjoint(md.seeds("test"))
+    with pytest.raises(AssertionError):
+        training_pool([0, 150])                                               # contains val and test seeds
+
+
+def test_rl_policy_in_dict_mode_never_asks_the_env_for_the_privileged_state():
+    from rl_utils import RLPolicy
+
+    class Model:
+        observation_space = UAVEnv.dict_space(NEW_GROUPS, md.CFG["env"]["grid"], privileged=True)
+        seen = []
+
+        def predict(self, obs, deterministic=True):
+            Model.seen.append(obs)
+            return np.array([0.0, 0.0], dtype=np.float32), None
+
+    env = UAVEnv(battery_wh=1000.0)
+
+    def forbidden():
+        raise AssertionError("the acting policy asked for the privileged state")
+    env.privileged_state = forbidden
+    env.reset(seed=4)
+    pol = RLPolicy(Model(), "goto", hold=10, obs_groups=NEW_GROUPS, obs_mode="dict")
+    pol.reset(env)
+    for _ in range(12):
+        env.step(pol.act(env))
+    assert len(Model.seen) == 2
+    for o in Model.seen:
+        assert Model.observation_space.contains(o)
+        assert not o["priv_maps"].any() and not o["priv_n"].any()            # zeros, never the true state
