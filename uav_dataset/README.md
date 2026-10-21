@@ -17,6 +17,8 @@ Read `../CLAUDE.md` first for the project rules, hypotheses (H1-H4) and gates.
     python view_run.py --seed 9 --users 600 --clusters 4 --mobility surge --obstacles 6 --policy B2   # your own
     python run_baselines.py --profile hard                    # compare all baselines (Gate G3)
     pip install -r ../requirements-rl.txt && python rl_train.py   # train PPO (config: rl:), then rl_eval.py
+    pip install -r ../requirements-dashboard.txt                # showcase + planning dashboard, then FROM THE REPO ROOT:
+    streamlit run uav_dataset/dashboard.py                    # opens http://localhost:8501 (AI models: UAV_MODELS_DIR)
 
 All settings are in `config.yaml`. Change values there, never in the code. One config per dataset version.
 `data/` is not in git: regenerate it. Splits are by seed and must never mix: train 0-99, val 100-119, test 120-139.
@@ -27,6 +29,7 @@ All settings are in `config.yaml`. Change values there, never in the code. One c
 | `make_dataset.py` | All the physics: scenarios, users, mobility, obstacles, channel (Al-Hourani + fading), NOMA/OMA, energy model, sweep |
 | `uav_env.py` | Gymnasium env (`reset`, `step`) built on `make_dataset.py`, so env and dataset cannot disagree |
 | `view_run.py` | Top-down viewer / GIF of one episode (demo policies only, not baselines) |
+| `dashboard.py` / `dashboard_core.py` | Streamlit dashboard (Showcase, Fly, Compare, Plan, About); all its logic is in `dashboard_core.py` (no streamlit import, tested) |
 | `export_excel.py` | Combines the split CSVs into one workbook with a `split` column |
 | `test_*.py` | Tests for NOMA, mobility, obstacles/fading/energy and the env |
 

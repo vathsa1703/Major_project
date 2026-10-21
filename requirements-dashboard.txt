@@ -1,0 +1,4 @@
+# Only needed for the showcase + planning dashboard (streamlit run uav_dataset/dashboard.py).
+# Install with: pip install -r requirements.txt -r requirements-dashboard.txt
+# Charts use altair, which ships with streamlit. Flying a trained AI also needs requirements-rl.txt.
+streamlit
