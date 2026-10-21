@@ -13,6 +13,7 @@ nothing", it proves nothing. Each rival plays exactly the same game (`env.step()
 | B4 | Particle swarm (PSO) | every 10 s, searches position, altitude and power with 12 particles x 10 iterations; objective = the v2 reward | |
 | B5 | Energy-aware | like B3, but moves only if the coverage gain x 10 s exceeds the extra energy cost of moving; that cost is clamped at 0 because forward flight is cheaper than hovering, so B5 behaves like B3 (D-14) | |
 | B6 | Grid search + altitude | like B3, but tries 5 altitudes (50, 100, 150, 200, 300 m) at every grid spot | added 10-19 (D-16) |
+| B3obs, B3obsU, B3obsUO | Information ladder | B3's search with only the AI's capped maps / uncapped maps / plus buildings; diagnostic only, not in the default runs | added 10-21 (D-37, Chapter 8.7) |
 
 The baselines see the true user positions (privileged information); the AI only sees maps. That makes them a strong test.
 Code: `uav_dataset/baselines.py`; settings in `config.yaml` (`baselines:`).

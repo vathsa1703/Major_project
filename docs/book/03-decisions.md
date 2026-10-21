@@ -42,6 +42,7 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-34 | 10-21 | Keep figures and GIFs in the book; the book is updated in every pull request | Owner |
 | D-35 | 10-21 | The book is also published as a PDF, rebuilt after every change | Owner |
 | D-36 | 10-21 | Major plans are reviewed by an independent agent before work starts; the agreed plan is Chapter 14.6 | Owner |
+| D-37 | 10-21 | Information-ladder pilots B3obs/B3obsU/B3obsUO as diagnostics; assumed crowd 500; not in default runs | Claude (plan step 1) |
 
 ---
 
@@ -214,3 +215,11 @@ request that changes the book.
 The owner asked that major plans be reviewed by a second agent acting as a senior engineer, and that both look for a better
 solution together. Claims from the review are checked in the code before being accepted. First use: Chapter 14 (draft, review,
 agreed plan, decisions for the owner).
+
+### D-37 The information-ladder pilots
+To find out whether the AI is limited by what it sees, three diagnostic pilots run B3's exact search with less information
+(Chapter 8.7). They rebuild a stand-in crowd from the maps, so they need an assumed crowd size: **500 people (engineering
+assumption, the mean of the crowd sizes drawn by the generator; `baselines.obs_pseudo_users`)**; checked at 200 and 1,000
+(validation 0.588 / 0.605 / 0.606). Non-rescue people are given the population's class mix, since their needs are not on the
+maps. The pilots are not part of the standard baseline runs (`run_baselines.py` runs B0-B6 unless they are named), so the
+G3 tables are unchanged.

@@ -125,7 +125,7 @@ errors and better ideas, not to agree. I checked each of its claims against the 
 ## 14.6 The agreed plan (draft and review combined), in order
 | # | Step | Why | Effort |
 |---|---|---|---|
-| 1 | **Information-matched baseline "B3-obs"**: grid search that uses only what the AI sees (density map cells, no obstacles, no classes); also compare the AI's training and validation scores | decides whether the plateau comes from missing information or from RL itself | 1 day |
+| 1 | **Information-matched baseline "B3-obs"**: grid search that uses only what the AI sees (density map cells, no obstacles, no classes); also compare the AI's training and validation scores | decides whether the plateau comes from missing information or from RL itself | 1 day. **Done 10-21** (Chapter 8.7): half information, half learning |
 | 2 | **Hybrid adaptive NOMA**: QoS-aware split, per-pair NOMA/OMA choice checking both users' minimum rates, an *equally optimised* OMA, greedy power admission across pairs; added as new `access` options so old results stay reproducible; tests; re-run H3 with four schemes and the baseline tables | removes the 232 kbps ceiling and makes H3 fair and strong | 3-4 days |
 | 3 | **Clairvoyant oracle on moving crowds** at a battery that binds: a receding-horizon B6 that knows the next 30-60 s of positions; later report how much of the oracle's lead over B6 the AI closes | measures whether H2 has anything to win before more training | 2-3 days |
 | 4 | **Give the AI the raw measurements it lacks (within D-24):** an obstacle map, a demand map, the previous frame; fresh training seeds; fix gamma | the cheapest fixes that stay inside the owner's rule | 3-4 days |
@@ -144,3 +144,11 @@ D-24; steps 3 and 5 add pilots, not hints.
 3. **Hierarchical design (Option A)** for the dynamic stage, where the AI chooses mission-level goals and computed layers carry
    them out: allowed or not?
 4. **Relax G4** and move on to moving crowds after steps 1 and 4, whatever the still-crowd score?
+
+## 14.8 Progress
+- **Step 1 done (2026-10-21), Chapter 8.7.** About half of the AI's gap to B3 is missing information and half is the AI not
+  using what it sees (it underfits even on its training scenarios). A search with only the AI's maps reaches 0.605, level
+  with B2, so G4 is reachable in principle. Consequences for step 4: remove the map cap and give the AI a finer map or a
+  count of people; an obstacle map is the least promising input. The learning half points at the action design (the AI aims
+  at the densest cell instead of a spot between crowds), which is exactly where owner decisions 1 and 2 in 14.7 matter.
+

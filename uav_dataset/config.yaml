@@ -119,6 +119,8 @@ baselines:
   altitude_levels_m: [50, 100, 150, 200, 300]   # B6: altitudes tried at every grid position
   pso: {particles: 12, iters: 10, inertia: 0.7, c1: 1.5, c2: 1.5}
   energy_aware_margin: 1.0      # B5 moves only if (coverage gain x K) > margin x extra energy cost (in reward units)
+  # B3obs / B3obsU / B3obsUO (information ladder): B3's search, but scored on a pseudo-crowd rebuilt from the maps.
+  obs_pseudo_users: 500         # ENGINEERING ASSUMPTION: crowd size they assume (mean of n_users_choices; must be even)
 
 # Named profiles = overrides of the settings above. Select with UAV_PROFILE=<name> or `--profile <name>`.
 # They exist because in the default scenarios a fixed drone already covers 88% of users, which leaves RL little to gain.
