@@ -53,6 +53,9 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-45 | 10-21 | Circling pilot B7 is judged by total service until the battery is empty | Owner |
 | D-46 | 10-21 | Turning/acceleration energy term added, labelled as our extension of the Zeng model | Owner |
 | D-47 | 10-21 | G4 closed as NOT met (best 0.576 < 0.580); stop still-crowd tuning; E0 is the starting agent for G5 | Rule D-43 + D-26 |
+| D-48 | 10-21 | Settings for G5 onwards: access `noma_opt`, sic_eps 0.05, rescue_first on, acceleration limit 4 m/s^2 on | Owner |
+| D-49 | 10-21 | Still-crowd fixes (G4b: move-by steering, longer training, bigger net; fix C) go to the backlog; the move-by fix is tested inside G5 | Owner |
+| D-50 | 10-21 | New roadmap (stages 0-5) replaces the 10-19 order; dashboard built now as a parallel showcase track (Streamlit approved) | Owner |
 
 ---
 
@@ -298,4 +301,21 @@ Best 3-run average 0.576 (E0) < 0.580; E3 0.565; E2 below the extra-run threshol
 behind B2 (-0.050). By D-43 and the stopping rule (D-26) the still-crowd tuning stops; this is reported as a negative result
 with its causes (Chapter 8.7-8.8). Per the owner's decision 4 (D-38) the project moves to moving crowds (G5) with E0 as the
 starting agent.
+
+### D-48 Settings from G5 on
+The owner chose, for every experiment from G5 on: adaptive NOMA (`env.access: noma_opt`) with imperfect SIC `sic_eps: 0.05`
+and rescue users admitted first, plus the acceleration limit (`uav.a_max_mps2: 4`) with the turning-energy term. Optimised OMA
+(`oma_opt`) is always reported next to it so H3 stays a fair test. The old settings stay selectable, so every earlier number
+remains reproducible. Before any G5 result, the baseline tables are re-run once under these settings.
+
+### D-49 Still-crowd fixes deferred
+"We have been stuck here for a long time" (owner): the still-crowd fixes go to the backlog. The fault they target (the AI flies
+past the best spot) would also hurt on moving crowds, so the "move by" steering and longer training are built into the G5 plan
+instead of a separate round.
+
+### D-50 Roadmap and dashboard
+The roadmap of 10-19 is replaced by stages 0-5 (`docs/roadmap.md`): 0 housekeeping and new defaults; 1 G5 (core); 2 disaster
+events; 3 realism and safety layer; 4 final evaluation and write-up (core); 5 a simulated drone that really flies (last).
+The owner asked for a dashboard now, to show the work visually; it is a parallel track (Streamlit, approved) built on the same
+engine, so its numbers equal the experiments'.
 

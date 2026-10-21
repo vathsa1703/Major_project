@@ -523,22 +523,65 @@ def access_rates(G, p_tx_w, noise_psd_w, B, min_rate, scheme, pairing="extreme",
     return (rates, info) if return_info else rates
 
 
-def propulsion_power_w(v):
-    """Rotary-wing propulsion power (Zeng, Xu, Zhang) at horizontal speed v (m/s). Hover = P0 + Pi."""
+def load_factor(a_h):
+    """Load factor kappa = thrust / weight when the drone accelerates horizontally at a_h (m/s^2):
+    kappa = sqrt(1 + (a_h / g)^2). OUR EXTENSION (not in Zeng's steady straight-flight model): quasi-steady rotor
+    thrust must carry the weight AND push the mass sideways, T = m * sqrt(g^2 + a_h^2), whatever the direction of
+    a_h (speeding up, braking or turning). kappa = 1 at a_h = 0 and grows monotonically with |a_h|."""
+    return np.sqrt(1.0 + (np.asarray(a_h, dtype=float) / CFG["energy"]["g_mps2"]) ** 2)
+
+
+def propulsion_power_w(v, kappa=1.0):
+    """Rotary-wing propulsion power (Zeng, Xu, Zhang) at horizontal speed v (m/s). Hover = P0 + Pi.
+    kappa (load factor, default 1 = Zeng's steady flight): OUR EXTENSION for accelerating / turning flight. Momentum
+    theory with thrust kappa * W: induced hover power Pi ~ T^1.5 -> Pi * kappa^1.5, induced velocity
+    v0 ~ sqrt(T) -> v0 * sqrt(kappa); blade-profile and parasite terms are unchanged. kappa = 1 gives Zeng exactly."""
     e = CFG["energy"]
+    pi_w = e["Pi_w"] * kappa**1.5
+    v0 = e["v0_mps"] * kappa**0.5
     blade = e["P0_w"] * (1 + 3 * v**2 / e["Utip_mps"] ** 2)
-    induced = e["Pi_w"] * np.sqrt(np.sqrt(1 + v**4 / (4 * e["v0_mps"] ** 4)) - v**2 / (2 * e["v0_mps"] ** 2))
+    induced = pi_w * np.sqrt(np.sqrt(1 + v**4 / (4 * v0**4)) - v**2 / (2 * v0**2))
     parasite = 0.5 * e["d0"] * e["rho_kg_m3"] * e["s"] * e["A_m2"] * v**3
     return blade + induced + parasite
 
 
-def energy_step_j(v_h, vz, p_tx_w):
+def energy_step_j(v_h, vz, p_tx_w, a_h=None):
     """Energy for one step: propulsion + climbing (weight x climb rate, no recovery when descending)
-    + communication (P_tx / PA efficiency) + circuit."""
+    + communication (P_tx / PA efficiency) + circuit.
+    a_h: realised horizontal acceleration (m/s^2) during the step. None (default) = Zeng's steady flight, exactly the
+    old numbers. Given (the env passes it only when uav.a_max_mps2 is set and energy.accel_power is true), the
+    propulsion term becomes propulsion_power_w(v_h, load_factor(a_h)) (OUR EXTENSION)."""
     e = CFG["energy"]
     climb = e["weight_n"] * np.maximum(vz, 0.0)
     comm = p_tx_w / e["pa_efficiency"]
-    return (propulsion_power_w(v_h) + climb + comm + e["P_circuit_w"]) * e["dt_s"]
+    prop = propulsion_power_w(v_h) if a_h is None else propulsion_power_w(v_h, load_factor(a_h))
+    return (prop + climb + comm + e["P_circuit_w"]) * e["dt_s"]
+
+
+def min_power_speed(v_max, radius_m=None, a_max=None, tol=1e-6):
+    """Speed (m/s) in [0, v_max] that minimises the propulsion power: Zeng's minimum-power speed v* when
+    radius_m is None. With radius_m (a loiter circle) and the accel-energy term on, the centripetal acceleration
+    v^2 / r raises the load factor, so the minimum moves; a_max (if given) also caps v at sqrt(a_max * r), the fastest
+    speed the drone can hold on that circle. Golden-section search on a fine grid's best bracket (no magic constant)."""
+    hi = float(v_max) if radius_m is None or a_max is None else float(min(v_max, np.sqrt(a_max * radius_m)))
+
+    def p(v):
+        if radius_m is None:
+            return propulsion_power_w(v)
+        return propulsion_power_w(v, load_factor(v * v / radius_m))
+
+    grid = np.linspace(0.0, hi, 401)
+    vals = np.array([p(v) for v in grid])
+    i = int(np.argmin(vals))
+    lo_b, hi_b = grid[max(i - 1, 0)], grid[min(i + 1, len(grid) - 1)]
+    phi = (np.sqrt(5) - 1) / 2
+    while hi_b - lo_b > tol:
+        c, d = hi_b - phi * (hi_b - lo_b), lo_b + phi * (hi_b - lo_b)
+        if p(c) <= p(d):
+            hi_b = d
+        else:
+            lo_b = c
+    return float((lo_b + hi_b) / 2)
 
 
 def jain(r):

@@ -423,3 +423,14 @@ Track 2 result (Chapter 8.8): best AI 0.576 over 3 runs, 0.004 short of the pass
 the privileged critic did not help. **G4 not met; stopping rule reached; on to moving crowds.** Merging Track 1 into Track 2 had
 one conflict (both added arguments to `UAVEnv.__init__`), resolved by keeping both; 251 tests pass.
 
+### 50. Circling beats hovering on a tight battery; settings for G5; a new roadmap
+Step 5 (Chapter 7.10, Chapter 4.7): with the acceleration limit and turning cost on (the shaking trick closed; I checked:
+shaking now costs 175 J/s, more than hovering), a pilot that circles at 9.8 m/s instead of hovering serves 25.6% more
+people-seconds per battery, and in a 5-minute mission with a 12-13 Wh battery it finishes while the hovering pilot dies
+(+0.08 to +0.12 coverage). The gain survives every parameter change tried (+21% to +31%). Merging step 5 with Tracks 1 and 2
+had one conflict (both added pilots to the list), resolved by keeping all; 277 tests pass.
+The owner chose the settings for G5 (D-48), moved the still-crowd fixes to the backlog with the "move by" steering tested
+inside G5 (D-49), approved a new roadmap and asked for a dashboard to show the work (D-50). When the owner wondered whether
+the project was failing, I listed what is proven (H1, H3, B7, the simulator, the dataset) against the one open problem (the AI
+does not hold the best spot), and made two GIFs of scenario 105 showing that problem (AI 0.66, B3 0.78).
+
