@@ -21,7 +21,7 @@ from matplotlib.patches import Rectangle
 
 import make_dataset as md
 from baselines import POLICIES, make_policy
-from rl_utils import CONTROLS, RandomPolicy, RLPolicy, model_settings
+from rl_utils import CONTROLS, RandomPolicy, load_policy, model_settings
 from uav_env import UAVEnv
 
 ALIASES = {"fixed": "B0", "follow": "B1"}
@@ -42,8 +42,7 @@ def build_policy(name, model_path=None, controls=None, hold=None):
     if name == "ppo":
         if not model_path:
             raise ValueError("--policy ppo needs --model path/to/model.zip")
-        from stable_baselines3 import PPO
-        return RLPolicy(PPO.load(model_path, device="cpu"), controls, hold, saved.get("obs_groups"))
+        return load_policy(model_path, controls, hold)              # PPO or SAC, from the model's saved settings
     raise ValueError(f"unknown policy {name!r}; choose from {sorted(POLICIES)} + random, ppo")
 
 

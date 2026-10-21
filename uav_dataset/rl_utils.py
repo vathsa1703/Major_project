@@ -80,16 +80,31 @@ class HoldWrapper(gym.Wrapper):
         return obs, total, terminated, truncated, info
 
 
-def make_env(controls="xy", reward=None, scenario_seeds=None, battery_wh=None, hold=1, obs_groups=None):
+def make_env(controls="xy", reward=None, scenario_seeds=None, battery_wh=None, hold=1, obs_groups=None,
+             obs_mode="box", privileged=False):
     """A training/eval env. Call AFTER md.apply_profile(...): the env reads the config when it is created.
-    hold = how many seconds the agent's choice is held (1 = it decides every second)."""
+    hold = how many seconds the agent's choice is held (1 = it decides every second); it is also the spacing of the
+    `history` observation group. obs_mode/privileged: see UAVEnv (privileged = critic-only true state, dict only)."""
     env = ControlWrapper(UAVEnv(reward=reward, battery_wh=battery_wh, scenario_seeds=scenario_seeds,
-                                obs_groups=obs_groups), controls)
+                                obs_groups=obs_groups, obs_mode=obs_mode, privileged=privileged,
+                                history_every=hold), controls)
     return HoldWrapper(env, hold) if hold > 1 else env
 
 
 def train_seeds():
     return md.seeds("train")
+
+
+def training_pool(seed_range=None):
+    """Scenario seeds the agent trains on. None = the training split (0-99, the old behaviour). [lo, hi] = a pool of
+    FRESH procedural scenarios lo..hi (inclusive), which must not overlap the validation or test seeds."""
+    if seed_range is None:
+        return train_seeds()
+    lo, hi = (int(v) for v in seed_range)
+    pool = list(range(lo, hi + 1))
+    held_out = set(md.seeds("val")) | set(md.seeds("test"))
+    assert pool and held_out.isdisjoint(pool), "the training pool must not contain validation or test seeds"
+    return pool
 
 
 # ---------------------------------------------------------------- adapters for run_baselines.run_episode
@@ -98,18 +113,48 @@ class RLPolicy:
 
     name = "PPO"
 
-    def __init__(self, model, controls, hold=1, obs_groups=None):
-        # controls, hold and obs_groups must match how the model was trained (see model_settings)
+    def __init__(self, model, controls, hold=1, obs_groups=None, obs_mode="box"):
+        # controls, hold, obs_groups and obs_mode must match how the model was trained (see model_settings)
         self.model, self.controls, self.hold, self.obs_groups = model, controls, hold, obs_groups
+        self.obs_mode = obs_mode or "box"
         self.last = None
 
     def reset(self, env):
         self.last = None
 
+    def observation(self, env):
+        """What the acting policy sees. The env is NEVER asked for the privileged (critic-only) state. If the model
+        was trained with an asymmetric critic, its observation space still lists the priv keys; they are filled with
+        zeros, which the actor's extractor ignores anyway (it never reads priv keys)."""
+        if self.obs_mode != "dict":
+            return env.observation(self.obs_groups, history_every=self.hold)
+        obs = env.observation(self.obs_groups, dict_obs=True, history_every=self.hold, privileged=False)
+        space = getattr(self.model, "observation_space", None)
+        for k, sp in getattr(space, "spaces", {}).items():
+            if k not in obs:
+                assert k.startswith("priv"), f"the env did not produce the observation key {k!r}"
+                obs[k] = np.zeros(sp.shape, dtype=sp.dtype)
+        return obs
+
     def act(self, env):
         if self.last is None or env.t % self.hold == 0:                  # decide every `hold` seconds
-            self.last, _ = self.model.predict(env.observation(self.obs_groups), deterministic=True)
+            self.last, _ = self.model.predict(self.observation(env), deterministic=True)
         return expand_action(self.last, self.controls, env)
+
+
+def load_policy(model_path, controls=None, hold=None):
+    """A trained model (PPO or SAC, read from its saved settings) as an RLPolicy, with its own controls, hold,
+    observation groups and observation mode."""
+    saved = model_settings(model_path)
+    algo = saved.get("algo", "PPO")
+    if algo == "SAC":
+        from stable_baselines3 import SAC as Algo
+    else:
+        from stable_baselines3 import PPO as Algo
+    pol = RLPolicy(Algo.load(model_path, device="cpu"), controls or saved.get("controls", "xy"),
+                   hold or saved.get("hold_steps", 1), saved.get("obs_groups"), saved.get("obs_mode", "box"))
+    pol.name = algo
+    return pol
 
 
 class RandomPolicy:

@@ -173,13 +173,13 @@ def allocate(weights, n):
     return counts
 
 
-def pseudo_population(env, all_map, rescue_map):
-    """A stand-in crowd of `obs_pseudo_users` users at the heatmap cell centres, built only from two maps.
+def pseudo_population(env, all_map, rescue_map, n=None):
+    """A stand-in crowd of `n` (default `obs_pseudo_users`) users at the heatmap cell centres, built only from two maps.
     Rescue pseudo-users (prior share of the rescue class from config) are placed by the rescue map, the others
     by the all-users map. Returns xy (n, 2) and class_probs (n, n_classes): rescue users are certainly rescue,
     the others follow the config class mix over the non-rescue classes (the agent cannot see their classes)."""
-    n = BCFG["obs_pseudo_users"]
-    assert n % 2 == 0, "obs_pseudo_users must be even (NOMA pairs)"
+    n = BCFG["obs_pseudo_users"] if n is None else int(n)
+    assert n % 2 == 0, "the pseudo-crowd size must be even (NOMA pairs)"
     names = list(md.CFG["classes"])
     shares = np.array([md.CFG["classes"][c]["share"] for c in names], dtype=float)
     shares = shares / shares.sum()
@@ -223,14 +223,21 @@ class B3Obs(B3GridSearch):
     only seeds random pairing (unused with pairing: extreme)."""
     name = "B3obs"
     use_boxes = False
+    true_n = False              # B3obsN / B3obsUN: the pseudo-crowd has the TRUE number of users (the agent's crowd_n)
 
     def maps(self, env):
         o = env.observation(("heat_all", "heat_rescue")).astype(float)
         return o[: env.grid**2], o[env.grid**2:]
 
     def score(self, env, X, Y, H, p_w):
-        xy, probs = pseudo_population(env, *self.maps(env))
+        xy, probs = pseudo_population(env, *self.maps(env), n=env.sc["n_users"] if self.true_n else None)
         return expected_coverage(env, xy, probs, X, Y, H, p_w, env.boxes if self.use_boxes else None)
+
+
+class B3ObsN(B3Obs):
+    """B3obsN: B3obs told the true number of users (what the agent's crowd_n input gives it). Capped maps."""
+    name = "B3obsN"
+    true_n = True
 
 
 class B3ObsUncapped(B3Obs):
@@ -248,6 +255,13 @@ class B3ObsUncappedObstacles(B3ObsUncapped):
     size and class prior; full B3 adds true positions inside cells, the true crowd size and the true classes."""
     name = "B3obsUO"
     use_boxes = True
+
+
+class B3ObsUncappedN(B3ObsUncapped):
+    """B3obsUN: uncapped maps plus the true number of users. This is exactly the information of the Track 2 agent's
+    inputs (heat_all_u, heat_rescue_u, crowd_n), so it is the information-matched bar for that agent."""
+    name = "B3obsUN"
+    true_n = True
 
 
 class B6GridAltitude(Policy):
@@ -333,7 +347,8 @@ class B5EnergyAware(Policy):
 
 
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
-            "B6": B6GridAltitude, "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles}
+            "B6": B6GridAltitude, "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles,
+            "B3obsN": B3ObsN, "B3obsUN": B3ObsUncappedN}
 
 
 def make_policy(name):
