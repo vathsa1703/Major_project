@@ -43,6 +43,11 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-35 | 10-21 | The book is also published as a PDF, rebuilt after every change | Owner |
 | D-36 | 10-21 | Major plans are reviewed by an independent agent before work starts; the agreed plan is Chapter 14.6 | Owner |
 | D-37 | 10-21 | Information-ladder pilots B3obs/B3obsU/B3obsUO as diagnostics; assumed crowd 500; not in default runs | Claude (plan step 1) |
+| D-38 | 10-21 | Owner's answers to 14.7: asymmetric critic yes; cell action head no; hierarchical design later; move to moving crowds after tracks 1 and 2 | Owner |
+| D-39 | 10-21 | Adaptive NOMA design after a second review: admit-then-pair, minimum-power closed form, imperfect SIC from the start, same slot rule for both schemes | Claude + reviewer |
+| D-40 | 10-21 | Better-learner design after a second review: uncapped map, crowd size, own measurement history, fresh seeds, SAC with a training-only privileged critic | Claude + reviewer |
+| D-41 | 10-21 | The physics default stays `access: noma` until G4 is closed, so the bars the AI is judged against do not move | Claude + reviewer |
+| D-42 | 10-21 | Adaptive NOMA added as `noma_opt` (with `oma_opt` as its fair reference); default unchanged; G5 default is the owner's call | Claude |
 
 ---
 
@@ -223,3 +228,49 @@ assumption, the mean of the crowd sizes drawn by the generator; `baselines.obs_p
 (validation 0.588 / 0.605 / 0.606). Non-rescue people are given the population's class mix, since their needs are not on the
 maps. The pilots are not part of the standard baseline runs (`run_baselines.py` runs B0-B6 unless they are named), so the
 G3 tables are unchanged.
+
+### D-38 The owner's four decisions (Chapter 14.7)
+1. **Asymmetric critic: yes.** During training only, the critic (the part that judges, thrown away afterwards) may see the
+   true raw state: true crowd density, buildings, rescue users, needs, crowd size. The flying policy never sees it. Not
+   allowed even for the critic: anything computed by a baseline's scorer (for example a map of coverage at every spot), which
+   would amount to copying the baseline. Disclosed in every result that uses it.
+2. **Cell action head: no.** It resembles the rejected 100-cell menu (D-24).
+3. **Hierarchical design (Option A): later**, after the moving-crowd results.
+4. **Move on to moving crowds (G5)** after tracks 1 and 2, whatever the still-crowd score.
+
+### D-39 Adaptive NOMA: the reviewed design (Track 1)
+My first design (Chapter 14.3, P1) had four flaws the second review found and I verified:
+- With perfect SIC, NOMA never needs more power than OMA for a pair, so a per-pair "NOMA or OMA" choice is decided before any
+  experiment. The choice only matters with **imperfect SIC** (a residual epsilon of the removed signal), which is therefore part
+  of the design from the start (epsilon = 0 and 0.05, engineering assumption).
+- Deciding per pair after extreme pairing ties every cheap user to an expensive partner; the reviewer measured that this is
+  even worse than optimised OMA. Instead: **admit users cheapest-first, then pair the admitted users** (strongest with weakest).
+  The largest number of users that fits the power budget is found by binary search (measured: same result as an exhaustive scan
+  on 4 of 5 scenarios, 40-100 ms per evaluation of 196 spots).
+- The split alpha* assumed equal power per pair. Instead each pair gets its **minimum power**, in closed form:
+  p_s = gamma_s N (eps gamma_w / g_w + 1 / g_s) / (1 - eps gamma_s gamma_w), p_w = gamma_w (p_s + N / g_w).
+- Bandwidth accounting decides the result, so one rule for both schemes: the slot of a user who is not served is wasted.
+Both schemes are optimised the same way (`oma_opt`, `noma_opt`); leftover power is scaled up by one common factor. Optional
+"rescue users first" admission. The old schemes stay byte-identical.
+
+### D-40 A better learner: the reviewed design (Track 2)
+- Inputs (all raw measurements): an **uncapped** crowd map (no saturation), the **number of connected users**, and the drone's
+  own last 4 positions and measured coverages. Fresh procedural training scenarios (10,000+ seeds, never val/test). Planning
+  horizon gamma 0.95 to match 30 decisions per game.
+- **SAC with a privileged critic.** In PPO a privileged critic only estimates how good a situation is (it reduces noise but
+  cannot show where to go). In SAC the critic scores *actions*, so a critic that knows the true state can learn where the good
+  spots are and steer the policy towards them, while the policy itself still sees only raw measurements. A test checks that
+  changing the privileged inputs leaves the policy's output unchanged.
+- Budget: SAC is about 5-20 decisions per second on this laptop (PPO about 60), so one seed per variant first, more seeds only
+  for a variant that beats B3obs (0.605). Stopping rule: if none does, close G4 as a negative result and go to moving crowds.
+
+### D-41 Keep `access: noma` while G4 is open
+Adaptive NOMA changes coverage by 10-25 points and moves the best spots, so it would change B2, B3 and B3obs, the bars the AI is
+judged against. Track 2 trains and evaluates with today's NOMA; the project default for G5 is decided after Track 1's results.
+
+### D-42 Adaptive NOMA is an option, not yet the default
+`noma_opt` and `oma_opt` are new values of `env.access`; `sic_eps: 0.0` and `rescue_first: false` are new settings under
+`access:` (engineering assumptions). The default stays `noma` (D-41), so every earlier number is unchanged and reproducible.
+Before G5 the owner chooses the project default once. My recommendation: `noma_opt` with `sic_eps: 0.05` (realistic, still
+beats optimised OMA) and `rescue_first: true` (fits a disaster mission), reported next to `oma_opt` so H3 stays a fair test.
+

@@ -68,6 +68,13 @@ fading:
 noma_alpha_weak: 0.8            # power share of the weak user (strong gets 0.2)
 pairing: extreme                # extreme (strongest with weakest) | random
 
+# QoS-aware access (book 14.6 step 2), used only when env.access is oma_opt or noma_opt (make_dataset.access_rates).
+# Every admitted user gets just its class's min rate at minimum power; the cheapest users are admitted first.
+access:
+  sic_eps: 0.0                  # ENGINEERING ASSUMPTION: imperfect-SIC residual (share of the weak user's power the
+                                # strong user cannot remove); 0 = perfect SIC; sensitivity {0, 0.05}; noma_opt only
+  rescue_first: false           # true = admit rescue users first, then the rest (lexicographic); default off
+
 # sweep of drone positions
 sweep:
   xy_step_m: 100                # 11 x 11 grid on 1000 m (use 50 for a finer 21 x 21)
@@ -101,7 +108,8 @@ uav:
 # Gymnasium env (Phase 5)
 env:
   grid: 10                      # NxN user-density heatmap
-  access: noma                  # noma | oma: how users share the radio (OMA = FDMA, same total bandwidth and power)
+  access: noma                  # noma | oma | oma_opt | noma_opt: how users share the radio (OMA = FDMA, same total
+                                # bandwidth and power); *_opt = QoS-aware minimum-power admission (see `access:`)
   reward: v2                    # v1 = coverage;  v2 = coverage - lambda_E * (energy_step / hover_energy_step)
   lambda_energy: 0.05           # ENGINEERING ASSUMPTION
   terminal_penalty: 1.0         # battery empty: reward -= penalty * share of users left uncovered

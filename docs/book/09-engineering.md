@@ -29,9 +29,10 @@ uav_dataset/
   compare_run.py         several pilots on one scenario in one picture
   noma_vs_oma.py         H3: every pilot under NOMA and under OMA, paired comparison
   noma_picture.py        the NOMA pairs on the map and every user's speed under NOMA vs OMA
+  access_benchmark.py    the four access schemes at each scheme's best spot (one snapshot)
   altitude_by_class.py   Gate G2 diagnostic (best altitude per user class)
   mobility_check.py      H1 check (fixed drone vs best position over time)
-  test_*.py              182 tests
+  test_*.py              227 tests
 ```
 Not committed: `uav_dataset/data/`, `data_v1/`, `results/`, logs, Excel files, `docs/papers/` (local copies of papers).
 
@@ -55,7 +56,7 @@ deletion; admin enforcement off.
 Lint rules: ruff E, F, W, I, B with line length 120; E741, E702 and E731 ignored (single-letter names, `a; b` and short lambdas
 are normal in the math code).
 
-## 9.4 Tests (182 on 2026-10-21)
+## 9.4 Tests (227 on 2026-10-21)
 | File | Tests | Covers |
 |---|---|---|
 | `test_noma.py` | 9 | gain vs distance, rate vs power, power split, SIC check (forced failure), pairing, scenario variety, class mix |
@@ -69,6 +70,7 @@ are normal in the math code).
 | `test_compare_run.py` | 3 | same scenario for every pilot, dead drone counts zero, determinism |
 | `test_rl.py` | 36 | control modes, waypoint flight, decision hold, scenario pool, static crowd, reward parts, observation groups, model settings, viewer pilots, PPO smoke |
 | `test_rl_net.py` | 5 | CNN output size, reproducibility, position sensitivity, PPO with CNN, noise annealing |
+| `test_access.py` | 45 | adaptive NOMA and optimised OMA: closed form, imperfect SIC, brute force on small crowds, power budget, monotone in power, odd crowds, rescue first, old schemes unchanged |
 | `test_noma_access.py` | 8 | NOMA default, both schemes reported, OMA scoring, evaluate uses the tested scheme, NOMA total speed, H3 table and runner, NOMA picture |
 
 Bugs caught by tests or CI so far: the fading flag not reaching the channel (test), a missing `tabulate` dependency (CI), a

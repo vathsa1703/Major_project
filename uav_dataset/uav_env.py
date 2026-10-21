@@ -46,7 +46,8 @@ class UAVEnv(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, reward=None, fading=None, battery_wh=None, scenario_seeds=None, scenario_overrides=None,
-                 obs_groups=None, access=None, obs_mode="box", privileged=False, history_every=None):
+                 obs_groups=None, access=None, obs_mode="box", privileged=False, history_every=None, sic_eps=None,
+                 rescue_first=None):
         """scenario_seeds: if given, reset() without an explicit scenario_seed draws the scenario from this pool
         (used for training, so the agent only ever sees the training seeds).
         obs_mode: "box" (flat vector, the default) or "dict". privileged: add the critic-only true state (dict only).
@@ -76,8 +77,12 @@ class UAVEnv(gym.Env):
         self.fading = CFG["fading"]["enabled"] if fading is None else fading
         # access: how the drone shares the radio. "noma" = pairs share a frequency (superposition + SIC);
         # "oma" = everyone gets a separate slice (FDMA) with the same total bandwidth and power. Used for H3.
+        # "oma_opt" / "noma_opt" = QoS-aware versions: each admitted user gets just its min rate at minimum power,
+        # cheapest users first (noma_opt pairs them and picks NOMA or OMA per pair); see make_dataset.access_rates.
         self.access = access or CFG["env"]["access"]
-        assert self.access in ("noma", "oma"), f"access must be noma or oma, not {self.access!r}"
+        assert self.access in md.ACCESS_SCHEMES, f"access must be one of {md.ACCESS_SCHEMES}, not {self.access!r}"
+        self.sic_eps = float(CFG["access"]["sic_eps"] if sic_eps is None else sic_eps)
+        self.rescue_first = bool(CFG["access"]["rescue_first"] if rescue_first is None else rescue_first)
         self.battery_j = (battery_wh if battery_wh is not None else CFG["energy"]["battery_wh"]) * 3600.0
         self.p_max_w = 10 ** ((self.uav["p_max_dbm"] - 30) / 10)
         self.noise_psd = 10 ** ((CFG["noise_density_dbm_hz"] + CFG["noise_figure_db"] - 30) / 10)
@@ -165,10 +170,18 @@ class UAVEnv(gym.Env):
         X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
         gains = md.channel_gain(ux, uy, X, Y, H, self.boxes)
         rng = np.random.default_rng([self.scenario_seed, self.t])
+        if self.access in md.QOS_SCHEMES:                 # vectorised over all candidates at once
+            return self.access_rates(gains, p_w, return_info=True)[1]["served"].mean(axis=1)
         pick = 0 if self.access == "noma" else 1
         return np.array([
             (md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"], rng)[pick]
              >= self.min_rate).mean() for g in gains])
+
+    def access_rates(self, gains, p_w, return_info=False):
+        """Rates under this env's QoS-aware scheme (oma_opt / noma_opt) for gains (N,) or (P, N)."""
+        return md.access_rates(gains, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.min_rate, self.access,
+                               eps=self.sic_eps, rescue=self.rescue, rescue_first=self.rescue_first,
+                               return_info=return_info)
 
     # ------------------------------------------------------------------ step
     def step(self, action):
@@ -191,13 +204,22 @@ class UAVEnv(gym.Env):
                             self.rng, self.fading)[0]
         rate_noma, rate_oma = md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"],
                                             self.rng)
-        rate = rate_noma if self.access == "noma" else rate_oma
-        # both are always reported, so every run also shows what the other scheme would have given
+        extra = {}
+        if self.access in md.QOS_SCHEMES:
+            rate, acc = self.access_rates(g, p_w, return_info=True)
+            served = acc["served"]
+            extra = dict(pairs=int(acc["pairs"]), noma_pairs=int(acc["noma_pairs"]),
+                         alpha_lt_half=int(acc["alpha_lt_half"]))
+        else:
+            rate = rate_noma if self.access == "noma" else rate_oma
+            served = rate >= self.min_rate
+        # the fixed schemes are always reported, so every run also shows what they would have given
         both = dict(coverage_noma=float((rate_noma >= self.min_rate).mean()),
                     coverage_oma=float((rate_oma >= self.min_rate).mean()),
                     sum_rate_noma_mbps=float(rate_noma.sum() / 1e6), sum_rate_oma_mbps=float(rate_oma.sum() / 1e6))
-        served = rate >= self.min_rate
         coverage = float(served.mean())
+        both.update(coverage_access=coverage, sum_rate_access_mbps=float(rate.sum() / 1e6),
+                    fairness_served=md.jain(rate[served]) if served.any() else 0.0, **extra)
         self.prev = dict(
             coverage=coverage,
             throughput=float(min(1.0, rate.sum() / (2.0 * self.min_rate.sum()))),

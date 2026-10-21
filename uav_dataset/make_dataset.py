@@ -336,6 +336,193 @@ def noma_rates(g, p_tx_w, noise_psd_w, B=None, pairing="extreme", rng=None):
     return noma, oma
 
 
+# ---------------------------------------------------------------- QoS-aware access (book 14.6 step 2)
+# Two extra schemes that give every user JUST its minimum rate and admit as many users as the total power allows:
+#   oma_opt : FDMA, equal slices b = B/N, minimum power per user, cheapest users first.
+#   noma_opt: hybrid NOMA, admitted users paired weakest-with-strongest on slices 2b; each pair uses NOMA with the
+#             minimum-power split (closed form below) or OMA inside the pair, whichever needs less power.
+# Unserved users get rate 0 and their slice is wasted (same rule for both). Leftover power is spread over the admitted
+# users by one common factor (keeps every power ratio, so NOMA decoding still works and every rate only goes up).
+ACCESS_SCHEMES = ("noma", "oma", "oma_opt", "noma_opt")
+QOS_SCHEMES = ("oma_opt", "noma_opt")
+
+
+def oma_min_power(g, rate, noise_psd_w, b):
+    """Minimum power (W) for `rate` (bit/s) on its own slice of b Hz: (2^(R/b) - 1) * noise_psd * b / g."""
+    return (2.0 ** (rate / b) - 1.0) * noise_psd_w * b / g
+
+
+def noma_pair_power(gs, gw, rs, rw, noise_psd_w, bp, eps=0.0):
+    """Minimum powers (p_s, p_w) so a NOMA pair on bp Hz gives the strong user (gain gs >= gw) rate rs and the weak
+    user rate rw. The weak user treats the strong user's signal as noise; the strong user removes the weak user's
+    signal by SIC, leaving the fraction eps of its power (imperfect SIC, eps = 0: perfect):
+        gamma = 2^(R / bp) - 1,  N = noise_psd * bp
+        p_s = gamma_s N (eps gamma_w / g_w + 1 / g_s) / (1 - eps gamma_s gamma_w)
+        p_w = gamma_w (p_s + N / g_w)
+    Infeasible (both inf) when eps gamma_s gamma_w >= 1."""
+    n0 = noise_psd_w * bp
+    gam_s, gam_w = 2.0 ** (rs / bp) - 1.0, 2.0 ** (rw / bp) - 1.0
+    den = 1.0 - eps * gam_s * gam_w
+    ok = den > 0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        p_s = np.where(ok, gam_s * n0 * (eps * gam_w / gw + 1.0 / gs) / np.where(ok, den, 1.0), np.inf)
+        p_w = np.where(ok, gam_w * (p_s + n0 / gw), np.inf)
+    return p_s, p_w
+
+
+def noma_pair_rates(p_s, p_w, gs, gw, noise_psd_w, bp, eps=0.0):
+    """Rates (r_s, r_w) of a NOMA pair with powers p_s, p_w on bp Hz (imperfect SIC residual eps at the strong user)."""
+    n0 = noise_psd_w * bp
+    r_w = bp * np.log2(1.0 + p_w * gw / (p_s * gw + n0))
+    r_s = bp * np.log2(1.0 + p_s * gs / (eps * p_w * gs + n0))
+    return r_s, r_w
+
+
+def _admission_order(c, p_tx_w, prio):
+    """(P, N) user order for admission: cheapest OMA cost first. With a priority mask (rescue_first), the priority
+    users that fit by OMA cost come first (cheapest first), then the others, then the priority users that cannot fit."""
+    if prio is None or not prio.any():
+        return np.argsort(c, axis=1, kind="stable")
+    cr = np.where(prio[None], c, np.inf)
+    rank_r = np.argsort(np.argsort(cr, axis=1, kind="stable"), axis=1, kind="stable")
+    m_r = (np.cumsum(np.sort(cr, axis=1), axis=1) <= p_tx_w).sum(axis=1)       # priority users that fit alone
+    group = np.where(prio[None], np.where(rank_r < m_r[:, None], 0, 2), 1)
+    return np.lexsort((c, group), axis=-1)
+
+
+def _ranks(order):
+    rank = np.empty_like(order)
+    np.put_along_axis(rank, order, np.arange(order.shape[1])[None].repeat(len(order), 0), axis=1)
+    return rank
+
+
+def _oma_opt(G, p_tx_w, noise_psd_w, B, R, prio):
+    P_, N = G.shape
+    b = B / N
+    c = oma_min_power(G, R[None], noise_psd_w, b)
+    order = _admission_order(c, p_tx_w, prio)
+    cum = np.cumsum(np.take_along_axis(c, order, axis=1), axis=1)
+    m = (cum <= p_tx_w).sum(axis=1)                            # prefix: the cheapest users that fit
+    served = _ranks(order) < m[:, None]
+    total = np.where(m > 0, cum[np.arange(P_), np.maximum(m - 1, 0)], 0.0)
+    f = np.where(total > 0, p_tx_w / np.where(total > 0, total, 1.0), 0.0)
+    gam = 2.0 ** (R / b) - 1.0                                  # admitted user's SNR at minimum power = gamma
+    rates = np.where(served, b * np.log2(1.0 + f[:, None] * gam[None]), 0.0)
+    zero = np.zeros(P_, int)
+    return rates, served, dict(pairs=zero, noma_pairs=zero, alpha_lt_half=zero, power_used_w=f * total,
+                               power_w=np.where(served, f[:, None] * c, 0.0), partner=np.full((P_, N), -1))
+
+
+def _noma_plan(G, c, R, rank, order, k, noise_psd_w, b, eps):
+    """Pair plan for admitting the first 2k users of `order` in every row (k: (P,) ints). The admitted users are
+    sorted by gain and paired j <-> 2k-1-j. Returns per-pair arrays (P, N//2) and the total power per row."""
+    P_, N = G.shape
+    rows = np.arange(P_)[:, None]
+    adm = rank < 2 * k[:, None]
+    srt = np.argsort(np.where(adm, G, np.inf), axis=1, kind="stable")   # admitted users first, by rising gain
+    j = np.arange(N // 2)[None]
+    valid = j < k[:, None]
+    wi = srt[:, : N // 2]
+    si = np.take_along_axis(srt, np.clip(2 * k[:, None] - 1 - j, 0, N - 1), axis=1)
+    gw, gs = G[rows, wi], G[rows, si]
+    p_s, p_w = noma_pair_power(gs, gw, R[si], R[wi], noise_psd_w, 2 * b, eps)
+    oma_cost = c[rows, si] + c[rows, wi]
+    use_noma = (p_s + p_w) <= oma_cost
+    cost = np.where(valid, np.minimum(p_s + p_w, oma_cost), 0.0)
+    return dict(valid=valid, wi=wi, si=si, p_s=p_s, p_w=p_w, use_noma=use_noma & valid), cost.sum(axis=1)
+
+
+def _noma_opt(G, p_tx_w, noise_psd_w, B, R, prio, eps, search="binary"):
+    P_, N = G.shape
+    b = B / N
+    c = oma_min_power(G, R[None], noise_psd_w, b)
+    order = _admission_order(c, p_tx_w, prio)
+    rank = _ranks(order)
+    lo, hi = np.zeros(P_, int), np.full(P_, N // 2)
+    if search == "binary":          # largest k whose plan fits (k = 0 always fits); log2(N) plans per row
+        while (lo < hi).any():
+            mid = (lo + hi + 1) // 2
+            ok = _noma_plan(G, c, R, rank, order, mid, noise_psd_w, b, eps)[1] <= p_tx_w
+            act = lo < hi
+            lo, hi = np.where(act & ok, mid, lo), np.where(act & ~ok, mid - 1, hi)
+    else:                           # "linear": the full scan, for tests only
+        for k in range(1, N // 2 + 1):
+            ok = _noma_plan(G, c, R, rank, order, np.full(P_, k), noise_psd_w, b, eps)[1] <= p_tx_w
+            lo = np.where(ok, k, lo)
+    plan, total = _noma_plan(G, c, R, rank, order, lo, noise_psd_w, b, eps)
+    rows = np.arange(P_)
+    # one more user alone on a slice b, the next in the admission order, if its OMA power still fits
+    nxt = order[rows, np.minimum(2 * lo, N - 1)]
+    single = (2 * lo < N) & (total + c[rows, nxt] <= p_tx_w)
+    total = total + np.where(single, c[rows, nxt], 0.0)
+    f = np.where(total > 0, p_tx_w / np.where(total > 0, total, 1.0), 0.0)[:, None]
+    rates = np.zeros((P_, N))
+    served = np.zeros((P_, N), bool)
+    v, wi, si, un = plan["valid"], plan["wi"], plan["si"], plan["use_noma"]
+    rr = np.broadcast_to(rows[:, None], wi.shape)
+    gam_b = 2.0 ** (R / b) - 1.0
+    with np.errstate(invalid="ignore"):
+        r_s, r_w = noma_pair_rates(f * plan["p_s"], f * plan["p_w"], G[rr, si], G[rr, wi], noise_psd_w, 2 * b, eps)
+    o_s, o_w = (b * np.log2(1.0 + f * gam_b[idx]) for idx in (si, wi))
+    rates[rr[v], si[v]] = np.where(un, r_s, o_s)[v]
+    rates[rr[v], wi[v]] = np.where(un, r_w, o_w)[v]
+    served[rr[v], si[v]] = served[rr[v], wi[v]] = True
+    rates[rows[single], nxt[single]] = b * np.log2(1.0 + f[single, 0] * gam_b[nxt[single]])
+    served[rows[single], nxt[single]] = True
+    # final per-user powers, and each user's NOMA partner (-1: alone on its slice, OMA inside the pair, or unserved)
+    power = np.where(served, f * c, 0.0)
+    partner = np.full((P_, N), -1)
+    vn = v & un
+    power[rr[vn], si[vn]], power[rr[vn], wi[vn]] = (f * plan["p_s"])[vn], (f * plan["p_w"])[vn]
+    partner[rr[vn], si[vn]], partner[rr[vn], wi[vn]] = wi[vn], si[vn]
+    with np.errstate(invalid="ignore"):
+        alpha = plan["p_w"] / (plan["p_s"] + plan["p_w"])
+    info = dict(pairs=v.sum(axis=1), noma_pairs=un.sum(axis=1), alpha_lt_half=(un & (alpha < 0.5)).sum(axis=1),
+                power_used_w=f[:, 0] * total, power_w=power, partner=partner)
+    return rates, served, info
+
+
+def access_rates(G, p_tx_w, noise_psd_w, B, min_rate, scheme, pairing="extreme", rng=None, eps=0.0, rescue=None,
+                 rescue_first=False, return_info=False, search="binary"):
+    """Per-user rates (bit/s) under one access scheme, for one drone position (G: (N,)) or many (G: (P, N)).
+    scheme: noma | oma  -> exactly noma_rates (fixed 80/20 NOMA split; equal-power FDMA);
+            oma_opt     -> QoS-aware FDMA (cheapest users first, each at its minimum power);
+            noma_opt    -> hybrid NOMA (admit-then-pair, minimum-power split, NOMA or OMA per pair).
+    min_rate: (N,) each user's minimum rate. eps: imperfect-SIC residual (noma_opt only). rescue + rescue_first:
+    admit the rescue users first (lexicographic). pairing / rng apply to noma | oma only (noma_opt always pairs
+    weakest with strongest inside the admitted set).
+    return_info=True -> (rates, info): info["served"] (bool, same shape) plus, per position, pairs, noma_pairs,
+    alpha_lt_half (NOMA-mode pairs whose weak user gets less than half the pair's power) and power_used_w; for
+    oma_opt / noma_opt also per user power_w (final transmit power) and partner (NOMA partner index, else -1).
+    search: "binary" (default) or "linear" (full scan of the number of pairs; for tests)."""
+    assert scheme in ACCESS_SCHEMES, f"unknown access scheme {scheme!r}; choose from {ACCESS_SCHEMES}"
+    G = np.asarray(G, dtype=float)
+    one = G.ndim == 1
+    G2 = G[None] if one else G
+    R = np.broadcast_to(np.asarray(min_rate, dtype=float), G2.shape[1:])
+    if scheme in ("noma", "oma"):
+        pick = 0 if scheme == "noma" else 1
+        rates = np.array([noma_rates(g, p_tx_w, noise_psd_w, B, pairing, rng)[pick] for g in G2])
+        served = rates >= R[None]
+        zero = np.zeros(len(G2), int)
+        info = dict(pairs=zero + G2.shape[1] // 2 * (scheme == "noma"), noma_pairs=zero, alpha_lt_half=zero,
+                    power_used_w=np.full(len(G2), float(p_tx_w)))
+    else:
+        prio = np.asarray(rescue, bool) if (rescue_first and rescue is not None) else None
+        if scheme == "oma_opt":
+            rates, served, info = _oma_opt(G2, p_tx_w, noise_psd_w, B, R, prio)
+        else:
+            rates, served, info = _noma_opt(G2, p_tx_w, noise_psd_w, B, R, prio, eps, search)
+        # admitted users meet their rate exactly at the minimum powers and above it after scaling; only round-off
+        # (relative 1e-9) can put them a hair below, which would wrongly count them as unserved
+        rates = np.where(served & (rates >= R[None] * (1 - 1e-9)), np.maximum(rates, R[None]), rates)
+    if one:
+        rates, served = rates[0], served[0]
+        info = {k: v[0] for k, v in info.items()}
+    info["served"] = served
+    return (rates, info) if return_info else rates
+
+
 def propulsion_power_w(v):
     """Rotary-wing propulsion power (Zeng, Xu, Zhang) at horizontal speed v (m/s). Hover = P0 + Pi."""
     e = CFG["energy"]

@@ -78,7 +78,14 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
   verify its claims in the code before accepting them; record draft, review and agreed plan in the book.
   Current agreed plan: book chapter 14.6; 4 owner decisions open in 14.7. STEP 1 DONE (10-21, book 8.7): B3obs (search with
   only the AI's maps) 0.605 vs AI 0.555 vs B3 0.659 on val20 -> half information, half learning; AI underfits; B3 parks
-  between crowds. Next: step 2 (hybrid NOMA) unless the owner says otherwise.
+  between crowds. OWNER DECISIONS (D-38): asymmetric critic yes (raw true state only, never a baseline's coverage map),
+  cell action head NO, hierarchical later, go to moving crowds (G5) after tracks 1+2. IN PROGRESS (10-21): Track 1 adaptive
+  NOMA (`oma_opt`/`noma_opt`, admit-then-pair, imperfect SIC; D-39) and Track 2 better learner (uncapped map, crowd size,
+  history, fresh seeds, SAC + privileged critic; D-40). Keep `access: noma` default while G4 is open (D-41).
+  TRACK 1 DONE (book 13.9): `env.access` noma_opt/oma_opt (`access_rates()` in make_dataset.py; `access.sic_eps`,
+  `access.rescue_first`). Adaptive NOMA beats equally optimised OMA by +0.03-0.05 coverage for every pilot (hard B3 0.849
+  vs 0.808; lowpower 0.983 vs 0.945), but both opt schemes give ~55-65% less total speed than fixed ones. Owner picks the
+  G5 default (D-42; recommendation noma_opt, eps 0.05, rescue_first).
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.

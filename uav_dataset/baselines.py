@@ -195,16 +195,40 @@ def pseudo_population(env, all_map, rescue_map, n=None):
     return xy, probs
 
 
+def explicit_classes(class_probs):
+    """One class index per pseudo-user, for the QoS-aware schemes (their rates depend on each user's own class).
+    Users with a certain class (probability 1, e.g. rescue) keep it. The others get the config mix: class counts by
+    largest-remainder rounding, then interleaved evenly along the list (users are ordered by cell, so every part of
+    the map gets the mix). Deterministic."""
+    probs = np.asarray(class_probs, dtype=float)
+    cls = np.argmax(probs, axis=1)
+    rest = np.flatnonzero(probs.max(axis=1) < 1.0)
+    if len(rest):
+        counts = allocate(probs[rest].mean(axis=0), len(rest))
+        pos = np.concatenate([(np.arange(n) + 0.5) / n for n in counts if n > 0])
+        lab = np.concatenate([np.full(n, k) for k, n in enumerate(counts) if n > 0])
+        cls[rest] = lab[np.argsort(pos, kind="stable")]
+    return cls
+
+
 def expected_coverage(env, xy, class_probs, X, Y, H, p_w, boxes=None):
     """Expected share of pseudo-users served at each candidate (X, Y, H): a pseudo-user counts with the probability
     that its class's min rate is met. Same physics path and rng recipe as UAVEnv.evaluate (channel_gain +
     noma_rates, env.access noma/oma, seeded by (scenario, t)); bandwidth follows make_scenario's rule
-    (pseudo count x bandwidth_per_user_hz)."""
+    (pseudo count x bandwidth_per_user_hz). With a QoS-aware scheme (oma_opt / noma_opt) each pseudo-user gets one
+    explicit class (explicit_classes) and the score is the share served by md.access_rates."""
     X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
     if len(xy) < 2:
         return np.zeros(len(X))
     min_rates = np.array([c["min_rate_bps"] for c in md.CFG["classes"].values()], dtype=float)
     gains = md.channel_gain(xy[:, 0], xy[:, 1], X, Y, H, boxes)
+    if env.access in md.QOS_SCHEMES:
+        cls = explicit_classes(class_probs)
+        rescue = cls == list(md.CFG["classes"]).index("rescue")
+        _, info = md.access_rates(gains, p_w, env.noise_psd, len(xy) * md.CFG["bandwidth_per_user_hz"],
+                                  min_rates[cls], env.access, eps=env.sic_eps, rescue=rescue,
+                                  rescue_first=env.rescue_first, return_info=True)
+        return info["served"].mean(axis=1)
     rng = np.random.default_rng([env.scenario_seed, env.t])
     pick = 0 if env.access == "noma" else 1
     bw = len(xy) * md.CFG["bandwidth_per_user_hz"]
