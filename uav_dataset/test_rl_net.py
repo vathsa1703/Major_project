@@ -54,3 +54,17 @@ def test_ppo_with_the_cnn_and_a_lean_observation_trains_and_acts(tmp_path):
     assert obs.shape == (2, 203)
     action, _ = model.predict(obs, deterministic=True)
     assert action.shape == (2, 2) and np.all(np.abs(action) <= 1)
+
+
+def test_std_anneal_shrinks_the_noise_on_a_straight_line_and_freezes_the_optimiser_out(tmp_path):
+    from rl_train import StdAnnealCallback
+    venv = DummyVecEnv([lambda: make_env("goto", "v1", scenario_seeds=md.seeds("train")[:3], hold=10)])
+    model = PPO("MlpPolicy", venv, n_steps=16, batch_size=16, n_epochs=1, seed=0, device="cpu",
+                policy_kwargs={"log_std_init": np.log(0.4)})
+    cb = StdAnnealCallback(0.4, 0.05, 160)
+    model.learn(total_timesteps=160, callback=cb)
+    steps = [s for _, s in cb.history]
+    assert steps[0] == pytest.approx(0.4) and steps[-1] < 0.12           # starts at the start value, ends near the end
+    assert all(a >= b for a, b in zip(steps, steps[1:], strict=False))   # never goes back up
+    assert not model.policy.log_std.requires_grad
+    assert float(model.policy.log_std.exp().mean()) == pytest.approx(steps[-1], rel=1e-3)

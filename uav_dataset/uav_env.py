@@ -29,7 +29,7 @@ class UAVEnv(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, reward=None, fading=None, battery_wh=None, scenario_seeds=None, scenario_overrides=None,
-                 obs_groups=None):
+                 obs_groups=None, access=None):
         """scenario_seeds: if given, reset() without an explicit scenario_seed draws the scenario from this pool
         (used for training, so the agent only ever sees the training seeds)."""
         # scenario_overrides: e.g. {"n_users": 500, "n_clusters": 4, "mobility": "surge", "n_obstacles": 6} replaces
@@ -49,6 +49,10 @@ class UAVEnv(gym.Env):
         assert not unknown, f"unknown observation groups {sorted(unknown)}; choose from {OBS_GROUPS}"
         self.reward_version = reward or CFG["env"]["reward"]
         self.fading = CFG["fading"]["enabled"] if fading is None else fading
+        # access: how the drone shares the radio. "noma" = pairs share a frequency (superposition + SIC);
+        # "oma" = everyone gets a separate slice (FDMA) with the same total bandwidth and power. Used for H3.
+        self.access = access or CFG["env"]["access"]
+        assert self.access in ("noma", "oma"), f"access must be noma or oma, not {self.access!r}"
         self.battery_j = (battery_wh if battery_wh is not None else CFG["energy"]["battery_wh"]) * 3600.0
         self.p_max_w = 10 ** ((self.uav["p_max_dbm"] - 30) / 10)
         self.noise_psd = 10 ** ((CFG["noise_density_dbm_hz"] + CFG["noise_figure_db"] - 30) / 10)
@@ -109,8 +113,9 @@ class UAVEnv(gym.Env):
         X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
         gains = md.channel_gain(ux, uy, X, Y, H, self.boxes)
         rng = np.random.default_rng([self.scenario_seed, self.t])
+        pick = 0 if self.access == "noma" else 1
         return np.array([
-            (md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"], rng)[0]
+            (md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"], rng)[pick]
              >= self.min_rate).mean() for g in gains])
 
     # ------------------------------------------------------------------ step
@@ -132,7 +137,13 @@ class UAVEnv(gym.Env):
         ux, uy = self.user_xy().T
         g = md.channel_gain(ux, uy, np.array([self.x]), np.array([self.y]), np.array([self.h]), self.boxes,
                             self.rng, self.fading)[0]
-        rate, _ = md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"], self.rng)
+        rate_noma, rate_oma = md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"],
+                                            self.rng)
+        rate = rate_noma if self.access == "noma" else rate_oma
+        # both are always reported, so every run also shows what the other scheme would have given
+        both = dict(coverage_noma=float((rate_noma >= self.min_rate).mean()),
+                    coverage_oma=float((rate_oma >= self.min_rate).mean()),
+                    sum_rate_noma_mbps=float(rate_noma.sum() / 1e6), sum_rate_oma_mbps=float(rate_oma.sum() / 1e6))
         served = rate >= self.min_rate
         coverage = float(served.mean())
         self.prev = dict(
@@ -155,6 +166,7 @@ class UAVEnv(gym.Env):
         info = self._info(served, rate=rate, energy_step_j=e_step, p_tx_w=p_w)
         # each reward part is reported separately, so reward hacking can be spotted
         info.update(reward_coverage=coverage, reward_energy=energy_term, reward_terminal=terminal_term)
+        info.update(both, access=self.access)
         return self._obs(), float(reward), bool(terminated), bool(truncated), info
 
     # ------------------------------------------------------------------ helpers

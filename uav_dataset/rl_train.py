@@ -23,6 +23,36 @@ from rl_utils import CONTROLS, make_env, train_seeds
 HERE = Path(__file__).parent
 
 
+class StdAnnealCallback(BaseCallback):
+    """Shrinks the exploration noise on a straight line from `start` to `end` over the whole training run.
+
+    The noise is the random wobble added to every action while the agent learns. In this task an action is a spot on a
+    2 km map, so a noise of 0.33 means about +-330 m, more than the width of a crowd, which hides the effect of the
+    agent's own choice from the learning signal. Annealing lets it explore widely at first and refine at the end.
+    It gives the agent no information about the task; it only changes how much it experiments."""
+
+    def __init__(self, start, end, total_timesteps):
+        super().__init__()
+        self.start, self.end, self.total = start, end, total_timesteps
+        self.history = []
+
+    def _set(self):
+        progress = min(self.num_timesteps / self.total, 1.0)
+        std = self.start + (self.end - self.start) * progress
+        self.model.policy.log_std.data.fill_(float(np.log(std)))
+        self.history.append((self.num_timesteps, std))
+
+    def _on_training_start(self):
+        self.model.policy.log_std.requires_grad_(False)       # the schedule decides it, not the optimiser
+        self._set()
+
+    def _on_rollout_start(self):
+        self._set()
+
+    def _on_step(self):
+        return True
+
+
 class RewardPartsCallback(BaseCallback):
     """After every rollout, log the mean of each reward part and of coverage over the steps just collected."""
 
@@ -104,10 +134,13 @@ def main():
     ap.add_argument("--policy", default=cfg["policy"], choices=["mlp", "cnn"],
                     help="how the agent reads the observation")
     ap.add_argument("--obs", default=",".join(cfg["obs_groups"]), help="comma list of observation groups to use")
+    ap.add_argument("--std_end", type=float, default=cfg["std_end"],
+                    help="if set, anneal the exploration noise from exp(log_std_init) down to this value")
     ap.add_argument("--no_norm_reward", action="store_true")
     a = ap.parse_args()
     cfg.update(profile=a.profile, controls=a.controls, reward=a.reward, total_timesteps=a.timesteps, seed=a.seed,
                log_std_init=a.log_std_init, hold_steps=a.hold, policy=a.policy, obs_groups=a.obs.split(","),
+               std_end=a.std_end,
                norm_reward=cfg["norm_reward"] and not a.no_norm_reward)
     name = a.name or f"{cfg['profile']}_{cfg['controls']}_{cfg['reward']}_s{cfg['seed']}"
     out = HERE / cfg["out_dir"] / name
@@ -124,7 +157,9 @@ def main():
     val_cb = ValScoreCallback(max(cfg["val_eval_every_steps"] // cfg["n_envs"], 1) * cfg["n_envs"],
                               md.seeds("val")[: cfg["val_eval_scenarios"]], cfg["controls"], cfg["hold_steps"],
                               cfg["obs_groups"])
-    callbacks = [RewardPartsCallback(), val_cb,
+    anneal = ([StdAnnealCallback(float(np.exp(cfg["log_std_init"])), cfg["std_end"], cfg["total_timesteps"])]
+              if cfg["std_end"] else [])
+    callbacks = [RewardPartsCallback(), val_cb, *anneal,
                  CheckpointCallback(max(cfg["checkpoint_every_steps"] // cfg["n_envs"], 1), str(out / "checkpoints"))]
     t0 = time.time()
     model.learn(total_timesteps=cfg["total_timesteps"], callback=callbacks, progress_bar=False)

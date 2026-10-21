@@ -30,10 +30,11 @@ def run_episode(env, policy, seed):
     """Play one episode with `policy` on scenario `seed`. Returns one row of metrics."""
     env.reset(seed=seed)
     policy.reset(env)
-    cov, fair, outage, reward, done, info = [], [], [], 0.0, False, {}
+    cov, fair, outage, rate, reward, done, info = [], [], [], [], 0.0, False, {}
     while not done:
         _, r, term, trunc, info = env.step(policy.act(env))
         cov.append(info["coverage"]); fair.append(info["fairness"]); outage.append(info["outage_rescue"])
+        rate.append(info["sum_rate_mbps"])
         reward += r
         done = term or trunc
     steps = len(cov)
@@ -43,12 +44,14 @@ def run_episode(env, policy, seed):
         "coverage_alive": float(np.mean(cov)), "reward_sum": reward, "fairness": float(np.mean(fair)),
         "outage_rescue": float(np.mean(outage)), "battery_left_wh": info["battery_wh"],
         "served_user_s_per_wh": info["served_user_s_per_wh"],
+        "sum_rate_mbps": float(np.mean(rate)), "access": info["access"],
     }
 
 
 def _task(args):
-    name, seed, battery_wh = args
-    return {"policy": name, **run_episode(UAVEnv(battery_wh=battery_wh), make_policy(name), seed)}
+    name, seed, battery_wh, *rest = args
+    access = rest[0] if rest else None
+    return {"policy": name, **run_episode(UAVEnv(battery_wh=battery_wh, access=access), make_policy(name), seed)}
 
 
 def fmt(values, k=3):

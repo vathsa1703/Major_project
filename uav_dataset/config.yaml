@@ -101,6 +101,7 @@ uav:
 # Gymnasium env (Phase 5)
 env:
   grid: 10                      # NxN user-density heatmap
+  access: noma                  # noma | oma: how users share the radio (OMA = FDMA, same total bandwidth and power)
   reward: v2                    # v1 = coverage;  v2 = coverage - lambda_E * (energy_step / hover_energy_step)
   lambda_energy: 0.05           # ENGINEERING ASSUMPTION
   terminal_penalty: 1.0         # battery empty: reward -= penalty * share of users left uncovered
@@ -171,6 +172,7 @@ rl:
   net_arch: [64, 64]
   policy: mlp                    # mlp = plain network on the observation | cnn = reads the two maps as a picture
   obs_groups: [pos, vel, battery, time, prev, heat_all, heat_rescue]   # what the agent sees (all = 211 numbers)
+  std_end: null                  # if a number, the exploration noise shrinks linearly from exp(log_std_init) to it (e.g. 0.05)
   log_std_init: -1.0             # start with action noise of about 0.37 (SB3 default 0 = 1.0, too noisy here)
   norm_reward: true              # scale rewards (returns are ~150): standard for PPO value learning
   val_eval_every_steps: 20000    # (decisions) print a deterministic score on the first val scenarios during training
