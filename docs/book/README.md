@@ -4,6 +4,8 @@ This book records everything the project has done, from the first run of the dat
 what was built, why each decision was taken, what came out (with the real numbers), what went wrong, and what is still open.
 It is written so that a new team member, the guide, or an examiner can follow the whole story without the chat history.
 
+**PDF version.** [`UAV-NOMA-Project-Book.pdf`](UAV-NOMA-Project-Book.pdf), rebuilt with `python docs/book/build_pdf.py`.
+
 **How it is kept up to date.** After every step of work (a new feature, an experiment, a decision, a merge) the relevant
 chapters are updated in the same pull request: the journal gets a dated entry, the decision log gets a new numbered decision,
 and results go into the results chapters with their exact numbers. Old entries are never rewritten to look better: if a result
@@ -29,6 +31,7 @@ the report and the viva. Chapter 12 is a glossary of every term.
 | 11 | [Outlook](11-outlook.md) | Roadmap, novelty and related work, the real-world gap, hardware path, business track |
 | 12 | [Glossary](12-glossary.md) | Every term in plain words |
 | 13 | [**NOMA in this project**](13-noma.md) | What NOMA is, where it sits, NOMA vs OMA measured in the game, its limits and next steps |
+| 14 | [A senior engineer's plan, reviewed](14-expert-plan.md) | How an expert would solve the problem, an independent review, the agreed next steps |
 
 **Start here for NOMA:** [Chapter 13](13-noma.md).
 

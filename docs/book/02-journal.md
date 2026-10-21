@@ -359,3 +359,22 @@ Results (100 scenarios each, 16 Wh so every pilot survives; Chapter 13 has the t
 ### 42. A long pause
 The NOMA vs OMA batch, started on 10-19 at 18:17, seemed hung on 10-21: no output for about 42 hours. Its workers had used only
 about 140 s of CPU each: the laptop had been asleep, pausing the run. It resumed when the laptop woke and finished normally (all three H3 runs complete on 10-21).
+
+## 2026-10-21
+
+### 43. The book as a PDF
+`docs/book/build_pdf.py` turns the Markdown chapters into `docs/book/UAV-NOMA-Project-Book.pdf` (ReportLab, with the DejaVu fonts
+that come with matplotlib): a title page, contents with page numbers, every table, list and code block, every figure once, GIFs as
+their last frame, and an appendix gallery for figures the text does not link. A bug in my converter (a line starting with "#2,"
+was neither a heading nor a paragraph, so the parser never moved on) made the first attempt run for 8 minutes; fixed. New rule:
+rebuild the PDF after every change to the book.
+
+### 44. A senior-level plan, reviewed by a second agent (Chapter 14)
+The owner asked me to approach the problem as a senior communications and AI engineer would, and to have the solution reviewed by
+another agent. My draft: split the problem by time scale (compute the NOMA allocation and the placement, learn only the mission
+strategy), fix NOMA with adaptive power allocation, and measure the headroom for RL with an oracle before training more.
+The reviewer confirmed the maths and found real gaps: an unfair OMA comparison, a guarantee that is true by construction, a
+ceiling that ignores flight time, and above all that **the AI never sees obstacles or demand while the search pilots do**. It also
+proposed better steps. I checked its claims in the code, accepted most of them, and declined one (a spatial action head that looks
+like the rejected 100-cell menu) until the owner decides. The agreed 7-step plan and four owner decisions are in Chapter 14.
+

@@ -72,8 +72,11 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
 ## Working agreements
 - **Keep the project book current (owner's rule, 2026-10-19).** `docs/book/` records everything in detail. After every step,
   in the same pull request: a dated journal entry (02), a numbered decision for any decision (03), results with exact numbers
-  in the right chapter (07, 08, 13), figures/GIFs into `docs/book/figures/`. Never rewrite old entries to look better; record
-  corrections as new entries.
+  in the right chapter (07, 08, 13), figures/GIFs into `docs/book/figures/`, then rebuild the PDF (`python docs/book/build_pdf.py`,
+  needs `requirements-docs.txt`). Never rewrite old entries to look better; record corrections as new entries.
+- **Review major plans with an independent agent** (owner's rule, 2026-10-21) acting as a senior communications/AI engineer;
+  verify its claims in the code before accepting them; record draft, review and agreed plan in the book.
+  Current agreed plan: book chapter 14.6 (step 1 = information-matched baseline B3-obs); 4 owner decisions open in 14.7.
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.

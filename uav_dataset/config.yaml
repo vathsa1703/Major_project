@@ -165,7 +165,7 @@ rl:
   batch_size: 256
   n_epochs: 10
   learning_rate: 0.0003
-  gamma: 0.995                   # long horizon (300 steps)
+  gamma: 0.995                   # kept from the 1-step setup; with hold_steps 10 a game is only 30 decisions (book 14.5)
   gae_lambda: 0.95
   clip_range: 0.2
   ent_coef: 0.0

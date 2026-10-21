@@ -40,6 +40,8 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-32 | 10-21 | NOMA/OMA switch in the game; H3 measured for every pilot | Owner ("add NOMA") |
 | D-33 | 10-21 | G4 tuning stops: the stopping rule is reached at 0.555 vs B2 0.610 | Rule D-26 (owner to decide next) |
 | D-34 | 10-21 | Keep figures and GIFs in the book; the book is updated in every pull request | Owner |
+| D-35 | 10-21 | The book is also published as a PDF, rebuilt after every change | Owner |
+| D-36 | 10-21 | Major plans are reviewed by an independent agent before work starts; the agreed plan is Chapter 14.6 | Owner |
 
 ---
 
@@ -202,3 +204,13 @@ or try other learners (SAC, memory) that give no hints.
 ### D-34 Figures and GIFs in the book
 Pictures and animations that support a result are copied into `docs/book/figures/` (and `figures/gifs/`) with captions saying
 which run produced them. Every pull request that changes results updates the book.
+
+### D-35 The book as a PDF
+`python docs/book/build_pdf.py` rebuilds `docs/book/UAV-NOMA-Project-Book.pdf` from the chapters. It needs `reportlab`
+(`requirements-docs.txt`); Pillow comes with matplotlib. The Markdown stays the source of truth; the PDF is rebuilt in every pull
+request that changes the book.
+
+### D-36 Independent review of plans
+The owner asked that major plans be reviewed by a second agent acting as a senior engineer, and that both look for a better
+solution together. Claims from the review are checked in the code before being accepted. First use: Chapter 14 (draft, review,
+agreed plan, decisions for the owner).

@@ -9,6 +9,7 @@ CLAUDE.md                project rules and current state (read at the start of e
 CONTRIBUTING.md          how to work: branch, test, pull request, review
 requirements.txt         simulator, baselines, tests (numpy pandas matplotlib pyyaml gymnasium pytest xlsxwriter openpyxl)
 requirements-rl.txt      + stable-baselines3, torch, tensorboard (only for training and evaluating the AI)
+requirements-docs.txt    + reportlab (only for rebuilding the book PDF with docs/book/build_pdf.py)
 pyproject.toml           ruff (lint), pytest and coverage settings
 .github/                 CI workflow, CODEOWNERS, pull-request template
 docs/                    assumptions.md, g3_baselines.md, rl_g4.md, roadmap.md, book/ (this book)
@@ -106,6 +107,8 @@ python rl_train.py --policy cnn --std_end 0.05 --name my_run
 python rl_eval.py --model results/rl/my_run/model.zip --split val
 python view_run.py --seed 5 --profile hard --policy B3
 python compare_run.py --seed 105 --profile rl_static --policies random,B2,B3,ppo --model results/rl/my_run/model.zip
+cd ..
+pip install -r requirements-docs.txt && python docs/book/build_pdf.py   # rebuild the book PDF (about 1 minute)
 ```
 
 ## 9.8 Troubleshooting (things that actually happened)
