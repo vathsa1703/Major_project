@@ -13,6 +13,7 @@ nothing", it proves nothing. Each rival plays exactly the same game (`env.step()
 | B4 | Particle swarm (PSO) | every 10 s, searches position, altitude and power with 12 particles x 10 iterations; objective = the v2 reward | |
 | B5 | Energy-aware | like B3, but moves only if the coverage gain x 10 s exceeds the extra energy cost of moving; that cost is clamped at 0 because forward flight is cheaper than hovering, so B5 behaves like B3 (D-14) | |
 | B6 | Grid search + altitude | like B3, but tries 5 altitudes (50, 100, 150, 200, 300 m) at every grid spot | added 10-19 (D-16) |
+| B7 | Circling pilot | chooses spots like B6, but circles them (radius 50 m) at the speed that uses the least power (9.8 m/s) instead of hovering | added 10-21 (D-45, 7.10) |
 | B3obs, B3obsU, B3obsUO | Information ladder | B3's search with only the AI's capped maps / uncapped maps / plus buildings; diagnostic only, not in the default runs | added 10-21 (D-37, Chapter 8.7) |
 
 The baselines see the true user positions (privileged information); the AI only sees maps. That makes them a strong test.
@@ -267,3 +268,44 @@ Mean coverage_full by mobility model (scenario counts: static 20):
 | mobility | B0 | B1 | B2 | B3 | B5 | Random |
 |---|---|---|---|---|---|---|
 | static | 0.441 | 0.600 | 0.610 | 0.659 | 0.659 | 0.413 |
+
+## 7.10 The circling pilot B7: does circling save battery? (plan step 5, 2026-10-21)
+**Plain words.** In the energy model of Zeng, Xu and Zhang, a drone flying at about 10 m/s uses less power than one hovering
+(126 W against 168 W), as with helicopters, which get extra lift from forward flight. So instead of parking over the best spot,
+B7 flies a 50 m circle around it. It chooses its spots exactly like B6. All runs with the acceleration limit and the turning
+cost switched on, so the comparison cannot be won by the shaking trick.
+
+**Main test (D-45): fly until the battery is empty.** Still crowds (`rl_static`), 10 Wh, up to 600 s, 50 scenarios:
+
+| Pilot | People-seconds served | Flight time | Coverage while flying | Mean power |
+|---|---|---|---|---|
+| B6 (hovers) | 67,682 | 198 s | 0.697 | 182.5 W |
+| **B7, circle 50 m** | **85,033 (+25.6%*)** | **249 s** | 0.696 (same) | 144.9 W |
+| B7, circle 100 m | 83,725 (+23.7%*) | 251 s | 0.680 | 143.7 W |
+
+Circling serves **about 26% more people per battery** with the same coverage while flying. Simple arithmetic predicts +31%
+(power ratio 173.7 / 132.7 W); the measured gain is a little lower because both pilots pay the same fixed cost of flying to
+their spot. A 50 m circle beats a 100 m circle (the wider circle strays further from the best spot).
+
+**In the normal 5-minute mission** (`hard`, moving crowds, 100 scenarios):
+
+| Battery | B6 (hovers) | B7 (circles) | Difference |
+|---|---|---|---|
+| 12 Wh | 0.596 (never survives) | **0.716** | +0.120* |
+| 13 Wh | 0.652 (never survives) | **0.730** (survives 98%) | +0.079* |
+| 14 Wh | 0.707 (survives 3%) | **0.731** | +0.024* |
+| 16 Wh | **0.739** | 0.731 | -0.009* |
+
+When the battery cannot cover hovering for the whole mission, circling wins clearly; when there is plenty of battery,
+hovering is slightly better (circling keeps the drone up to 50 m from the best spot).
+
+**Robustness (30 scenarios, one parameter changed at a time):** the gain stays between +21% and +31%: drag d0 0.3 (the paper's
+value) +30.7%, induced power Pi +-20% +30.4% / +20.8%, acceleration limit 2 or 8 m/s^2 +24.9% / +26.2%, radius 100 m +24.4%.
+So the conclusion does not depend on the unverified d0 = 0.6.
+
+**Not verified.** The turning-energy term is our own quasi-steady extension; whether Zeng's forward-flight formula holds in
+tight, slow circles is not verified (in this model even a 10 m circle is cheaper than hovering). Vertical acceleration is not
+charged. Runs used today's NOMA, no fading, full power.
+
+**Reproduce:** `python accel_loiter_exp.py run b` (also `a`, `c`, `d`), then `python accel_loiter_exp.py report`.
+

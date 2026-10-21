@@ -90,6 +90,10 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
   crowd_n, history; fresh seeds 10000-19999; gamma 0.95) 0.576 over 3 runs; SAC 0.567; SAC + privileged critic 0.565.
   Book 8.8. Next: G5 (moving crowds) with E0 as the starting agent, after step 3 (oracle headroom) and step 5 (accel
   limit + loiter B7; owner approved D-44..46, a_max off until G4 closes -> now may be switched on for G5).
+  STEP 5 DONE (book 7.10, 4.7): `uav.a_max_mps2` (null = off), `energy.accel_power` load factor (our extension), B7
+  circling pilot: +25.6% people-seconds per battery (run-to-empty), +0.08-0.12 coverage at 12-13 Wh; robust +21..31%.
+  G5 SETTINGS (D-48): noma_opt, sic_eps 0.05, rescue_first, a_max 4 (switch the defaults + rerun baselines first).
+  Roadmap stages 0-5 in docs/roadmap.md (D-50); dashboard (Streamlit) being built in parallel.
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.

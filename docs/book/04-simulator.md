@@ -143,6 +143,17 @@ Climbing term, amplifier efficiency 0.4 and circuit power 5 W are engineering as
 
 10 Wh lasts about 205 s of hovering; 300 s needs 14.7 Wh.
 
+**Acceleration limit and turning energy (added 2026-10-21, D-44 to D-46).** A reviewer found that the drone could change its
+velocity instantly. Shaking back and forth (+10, -10 m/s every second) kept it in place at the cheaper forward-flight power: 0 m
+moved, 131 J/s instead of 174 J/s hovering, a battery saving that is impossible in reality. No earlier result used it. The
+fix, switched on with `uav.a_max_mps2: 4` (off by default until the switch for G5, so all earlier numbers stay bit-exact):
+- velocity changes by at most a_max x 1 s per step (horizontal 4 m/s^2, vertical 3 m/s^2), and `go_to` brakes so it does not
+  overshoot;
+- accelerating, braking and turning cost extra: the rotors must carry a load factor kappa = sqrt(1 + (a/g)^2), so induced power
+  grows as kappa^1.5. This is **our extension** of the Zeng model (which covers steady straight flight), labelled as such.
+Checked: with the limit on, shaking costs 175 J/s, slightly more than hovering, as it should. The limit barely changes earlier
+results (B6 0.741 to 0.739, B3 0.675 to 0.674 on `hard`), because pilots decide only every 10 s.
+
 ## 4.8 The drone position sweep (dataset)
 `sweep_one()` evaluates every grid position (11 x 11 at 100 m steps), every altitude (12 levels, 50-1,000 m) and every power
 level (0, 10, 20, 30 dBm) for the users at t = 0, with obstacles and the average channel, and records coverage, sum rate,

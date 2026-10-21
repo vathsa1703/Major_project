@@ -82,6 +82,17 @@ Formula and equations VERIFIED in [Zeng]: `P(V) = P0(1+3V^2/Utip^2) + Pi*(sqrt(1
 | env.lambda_energy | 0.05 | none | ASSUMPTION (reward weight on energy) | 0.01 to 0.2 |
 | env.terminal_penalty | 1.0 | none | ASSUMPTION | 0 to 2 |
 
+## Acceleration and turning (added 2026-10-21, D-44..D-46)
+| Parameter | Value | Unit | Status and source | Sensitivity range |
+|---|---|---|---|---|
+| `uav.a_max_mps2` (horizontal acceleration limit) | null = off (old behaviour, bit-exact); 4 when on | m/s^2 | ENGINEERING ASSUMPTION | 2, 4, 8 (tested: result unchanged) |
+| `uav.az_max_mps2` (vertical) | 3 (only with the limit on) | m/s^2 | ENGINEERING ASSUMPTION | 2, 4 (not yet run) |
+| `energy.accel_power` (load-factor term) | true | flag | OUR EXTENSION of Zeng-Xu-Zhang (whose rotary-wing model covers steady straight flight): kappa = sqrt(1 + (a_h/g)^2), induced power x kappa^1.5, v0 x sqrt(kappa), quasi-steady; not validated against measurements | on / off |
+| `energy.g_mps2` | 9.81 | m/s^2 | standard | - |
+| `baselines.loiter_radius_m` (B7) | 50 | m | ENGINEERING ASSUMPTION | 50, 100 (tested) |
+| v* (minimum-power speed) | 10.21 | m/s | DERIVED from the Zeng formula with our parameters; P(v*) = 126.0 W vs hover 168.5 W | 9.6-12.0 over d0 and Pi ranges |
+| B7 loiter speed (r 50 / r 100) | 9.84 / 10.11 | m/s | DERIVED (minimum of P(V, kappa(V^2/r))) | follows d0, Pi, r |
+
 ## Still to do
 1. Read [Hourani] itself and confirm the (a, b, eta_LoS, eta_NLoS) rows and which environment is which.
    (Get the PDF via IEEE Xplore or your library and drop it in this repo's `docs/papers/`, which is gitignored.)
