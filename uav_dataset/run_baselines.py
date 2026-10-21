@@ -31,10 +31,12 @@ def run_episode(env, policy, seed):
     env.reset(seed=seed)
     policy.reset(env)
     cov, fair, outage, rate, reward, done, info = [], [], [], [], 0.0, False, {}
+    fair_served, noma_pairs, alpha_low = [], [], []
     while not done:
         _, r, term, trunc, info = env.step(policy.act(env))
         cov.append(info["coverage"]); fair.append(info["fairness"]); outage.append(info["outage_rescue"])
-        rate.append(info["sum_rate_mbps"])
+        rate.append(info["sum_rate_mbps"]); fair_served.append(info["fairness_served"])
+        noma_pairs.append(info.get("noma_pairs", 0)); alpha_low.append(info.get("alpha_lt_half", 0))
         reward += r
         done = term or trunc
     steps = len(cov)
@@ -45,13 +47,20 @@ def run_episode(env, policy, seed):
         "outage_rescue": float(np.mean(outage)), "battery_left_wh": info["battery_wh"],
         "served_user_s_per_wh": info["served_user_s_per_wh"],
         "sum_rate_mbps": float(np.mean(rate)), "access": info["access"],
+        "fairness_served": float(np.mean(fair_served)),
+        # noma_opt only (0 otherwise): mean NOMA-mode pairs per step, and the share of them with weak power share < 0.5
+        "noma_pairs": float(np.mean(noma_pairs)),
+        "alpha_lt_half_share": float(np.sum(alpha_low) / np.sum(noma_pairs)) if np.sum(noma_pairs) > 0 else 0.0,
     }
 
 
 def _task(args):
+    """(name, seed, battery_wh[, access[, env_kwargs]]) -> one episode row. env_kwargs e.g. {"sic_eps": 0.05}."""
     name, seed, battery_wh, *rest = args
     access = rest[0] if rest else None
-    return {"policy": name, **run_episode(UAVEnv(battery_wh=battery_wh, access=access), make_policy(name), seed)}
+    kw = rest[1] if len(rest) > 1 else {}
+    env = UAVEnv(battery_wh=battery_wh, access=access, **kw)
+    return {"policy": name, **kw, **run_episode(env, make_policy(name), seed)}
 
 
 def fmt(values, k=3):
