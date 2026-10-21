@@ -27,7 +27,9 @@ Rules that hold for every stage:
 - Re-run the baseline tables once under them.
 
 ## Stage 1: G5, the AI on moving crowds (H2), core, about 2 weeks
-- **Where:** only the crowd types where the clairvoyant pilot (step 3) beats B6 by at least 0.02. If there are none, make the scenarios harder first.
+- **Where:** only the crowd types where the clairvoyant pilot (step 3) beats B6 by at least 0.02. **Step 3 found none in
+  today's scenarios (+0.002, D-51), so the scenarios are redesigned first** (tight battery, competing crowds, sudden events or
+  narrower footprints; the owner chooses), and the clairvoyant test is re-run on them.
 - **Agent:**
   - start from E0;
   - add the previous-frame map (motion information, a raw measurement);

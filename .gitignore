@@ -36,3 +36,6 @@ docs/papers/
 
 # PDF build scratch (GIF stills)
 docs/book/build/
+
+# agents' working copies (git worktrees)
+.claude/

@@ -309,3 +309,45 @@ charged. Runs used today's NOMA, no fading, full power.
 
 **Reproduce:** `python accel_loiter_exp.py run b` (also `a`, `c`, `d`), then `python accel_loiter_exp.py report`.
 
+## 7.11 How much could an AI that anticipates gain? The clairvoyant pilot (plan step 3, 2026-10-21)
+**Plain words.** H2 says an AI should beat the search pilots on moving crowds because it can *anticipate*: B6 only reacts to
+where people are now. Before spending two weeks training, we measured the prize. A "clairvoyant" pilot that is **told the
+crowd's entire future** plans the best possible flight (dynamic programming over every reachable spot, every 10 s, on B6's own
+grid of 980 spots), and its plan is flown in the real game. No AI can do better than this pilot, so its lead over B6 is the most
+an anticipating AI could ever gain. Pass mark fixed beforehand (D-51): at least 0.02 for some crowd type.
+
+**Result (`hard`, 16 Wh, 120 scenarios, today's NOMA; paired with B6):**
+
+| Crowd type | B6 | Clairvoyant (dp) | Gain | Teleport bound (ignores flight time) |
+|---|---|---|---|---|
+| attraction (32) | 0.776 | 0.778 | +0.001 | +0.015 |
+| group drift (29) | 0.745 | 0.747 | +0.002 | +0.024 |
+| hotspot jump (26) | 0.701 | 0.702 | +0.001 | +0.021 |
+| surge (33) | 0.748 | 0.750 | +0.003 | +0.024 |
+| all (120) | 0.745 | 0.746 | +0.002* | +0.021 |
+
+**Knowing the whole future is worth +0.002 coverage: far below the 0.02 pass mark, for every crowd type.** The same holds with
+adaptive NOMA (30 scenarios, +0.001) and, as expected, on still crowds (+0.000).
+
+**Why.** B6 re-plans every 10 s and flies at 15 m/s, while crowds move at 0.5-3 m/s and the drone's coverage footprint is
+hundreds of metres wide, so a greedy pilot simply keeps up. Even during surges and jumps (60-180 s) a teleporting drone would
+add only +0.002. The only real gap is in the first minute (teleport bound +0.093): the unavoidable flight from the centre of the
+map to the crowd, which no amount of foresight can shorten (dp +0.004 there).
+
+**Side finding.** A pilot that looks only 30 s ahead does *worse* than B6 (-0.011, significant): it will not start a trip whose
+payoff comes later. Half-way anticipation can lose to plain greedy re-planning.
+
+**What it means for H2 (decision D-51).** In these scenarios there is no room for anticipation, so an AI cannot beat B6 by
+anticipating, however well it learns. This is a result in itself ("greedy re-planning is near-optimal when the drone is much
+faster than the crowd"). Not tested here: tight batteries (16 Wh never binds), where *when to move and how to spend the battery*
+matters, and where B7 already showed gains of +0.08 to +0.12. Before G5 the scenarios must be redesigned so that decisions now
+have consequences later, and the clairvoyant test re-run on them.
+
+**How it was checked.** 22 tests (the coverage table equals the game's evaluation; the planner's first decision equals B6's;
+every planned move is flyable; the planner equals brute force on a small grid; the bound is never below the planner; replays are
+deterministic). I recomputed the gains from the raw episode file and re-ran B6 on one scenario: identical (0.7206), and B6's mean
+on seeds 0-99 equals the G3 table (0.741). **Not verified:** a finer grid (that would be placement, not anticipation); the
+planner is optimal for its model of the game, whose score is 0.005 above the replay.
+
+**Reproduce:** `python oracle.py` (see its `--help`; coverage tables are cached in `results/oracle_cache/`).
+

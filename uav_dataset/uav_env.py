@@ -164,14 +164,16 @@ class UAVEnv(gym.Env):
     def user_xy(self, t=None):
         return self.P[self.t if t is None else t]
 
-    def evaluate(self, X, Y, H, p_w):
+    def evaluate(self, X, Y, H, p_w, t=None):
         """Coverage the drone WOULD get at each candidate position (X, Y, H arrays) with transmit power p_w (W),
-        for the current user positions. Average channel (no fading). Does not change env state or the env rng.
-        Used by the search baselines (B3, B4, B5)."""
-        ux, uy = self.user_xy().T
+        for the user positions at time index t (default: now, env.t). Average channel (no fading). Does not change
+        env state or the env rng. Used by the search baselines (B3, B4, B5, B6) and, with a future t, by the
+        clairvoyant oracle (oracle.py)."""
+        t = self.t if t is None else int(t)
+        ux, uy = self.user_xy(t).T
         X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
         gains = md.channel_gain(ux, uy, X, Y, H, self.boxes)
-        rng = np.random.default_rng([self.scenario_seed, self.t])
+        rng = np.random.default_rng([self.scenario_seed, t])
         if self.access in md.QOS_SCHEMES:                 # vectorised over all candidates at once
             return self.access_rates(gains, p_w, return_info=True)[1]["served"].mean(axis=1)
         pick = 0 if self.access == "noma" else 1

@@ -146,6 +146,22 @@ baselines:
   # B3obs / B3obsU / B3obsUO (information ladder): B3's search, but scored on a pseudo-crowd rebuilt from the maps.
   obs_pseudo_users: 500         # ENGINEERING ASSUMPTION: crowd size they assume (mean of n_users_choices; must be even)
 
+# Clairvoyant oracle (book 14.6 step 3, oracle.py): how much could ANTICIPATION add over the best myopic pilot B6?
+# It knows the crowd's future and plans over B6's own candidates (grid_n x grid_n x altitude_levels_m + the start spot).
+# Decisions every baselines.replan_every_steps seconds, like B6. Measurement only: never imported by the rl_* code.
+oracle:
+  sample_every_s: 5             # coverage tensor time step: cov[k, node] at t = 0, 5, ..., 295 s
+  horizons_s: [30, 60]          # receding-horizon (MPC) planners: plan this far ahead, execute one move, replan
+  frozen_path_horizon_s: 60     # 'frozen_path': path-aware like MPC, but with the users frozen where they are now
+  reach_slack: 0.03             # ENGINEERING CHOICE: the planner flies 3% faster than v_max, because the grid spacing
+                                # (2000/13 = 153.8 m on `hard`) is just above v_max x 10 s = 150 m; a 1-cell hop really
+                                # takes 10.26 s (the replay flies the true speed)
+  max_hop_decisions: null       # longest straight flight, in decisions; null = no limit (the planner can fly anywhere
+                                # straight, like B6 does; limiting it to 1-2 cells made the oracle slower than B6)
+  windows_s: [[0, 60], [60, 180], [180, 300]]   # report per time window (surges / hotspot jumps start 60-180 s)
+  min_gain: 0.02                # PRE-REGISTERED decision rule: dp - B6 below this for every mobility model ->
+                                # "no room for anticipation in these regimes; redesign scenarios before G5"
+
 # Named profiles = overrides of the settings above. Select with UAV_PROFILE=<name> or `--profile <name>`.
 # They exist because in the default scenarios a fixed drone already covers 88% of users, which leaves RL little to gain.
 # All values are engineering choices. Nothing here changes the default dataset.
