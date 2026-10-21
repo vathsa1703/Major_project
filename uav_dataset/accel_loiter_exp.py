@@ -194,7 +194,8 @@ def report():
         L += ["", "Paired, coverage_full:", "", *PAIR_HEAD, *paired_rows(pairs), ""]
 
     # ---- c
-    if "B7" in set(df[df.setting == "hard_on"].policy):
+    on = df[df.setting == "hard_on"]
+    if (on.policy == "B7").sum() == (on.policy == "B6").sum() == len(SEEDS_HARD):           # exp c complete
         L += ["## (c) Fixed 300 s game on hard, 100 scenarios, limit on: B6 (hover) vs B7 (loiter r 50)", "",
               "Smaller batteries by exact truncation of the 16 Wh logs (see module doc; verified by check-truncation).",
               "", "| battery Wh | B6 coverage_full | B6 survived | B7 coverage_full | B7 survived |",
