@@ -378,3 +378,12 @@ ceiling that ignores flight time, and above all that **the AI never sees obstacl
 proposed better steps. I checked its claims in the code, accepted most of them, and declined one (a spatial action head that looks
 like the rejected 100-cell menu) until the owner decides. The agreed 7-step plan and four owner decisions are in Chapter 14.
 
+### 45. Step 1 of the plan: why the AI stalls (two agents in parallel)
+The owner merged PR #9 and asked for step 1 with several agents working in parallel. Agent 1 built an "information ladder":
+three copies of B3's search that know less (only the AI's capped maps; uncapped maps; plus buildings), with 19 tests. Agent 2
+checked the AI on its own training scenarios and measured what the capped map hides. Results (Chapter 8.7): the search that
+sees only what the AI sees scores 0.605 (level with B2), the AI 0.555; so half the gap to B3 is information and half is
+learning. The AI is behind even on scenarios it trained on (underfitting). The map cap hides the size of 59% of the crowd,
+but a 20 x 20 map did not help, and B3's real trick is parking *between* crowds, which the AI never learned. I checked the
+code, reproduced the main number and showed it does not depend on the assumed crowd size (0.588-0.606).
+

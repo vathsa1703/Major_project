@@ -70,6 +70,79 @@ tuning and report this result. The owner decides whether to relax G4 and move on
 pilots are always a step late and an AI that anticipates has a real chance. Other learners (SAC, a network with memory) remain
 options that give no hints.
 
+**Update 2026-10-21:** step 1 of the agreed plan (Chapter 14.6) asked *why* the AI stalls. Answer in 8.7: about half of its gap
+to B3 is information it does not have, the other half is the AI not using what it does have.
+
+## 8.7 Why the AI stalls: the information ladder and the train/validation check (plan step 1)
+**The question.** The search pilots score spots with the true positions of every person, the buildings and each person's
+needs. The AI sees only two coarse 10 x 10 maps (everyone, rescue users), and those maps are **capped**: a cell holding more
+than 10% of the crowd simply reads "full". Is the AI stuck because it lacks information, or because it learns badly?
+
+**The method: an information ladder.** Three new pilots run *exactly* B3's search (same candidate spots, altitude, power,
+rhythm, tie-break) but score the spots with less information. Each rung adds one piece:
+
+| Pilot | What it knows |
+|---|---|
+| `B3obs` | only the AI's own two capped maps; it rebuilds a stand-in crowd of 500 people at the cell centres (crowd size = engineering assumption, D-37), no buildings, needs from the population mix |
+| `B3obsU` | the same maps **without the cap** (true share of people per cell) |
+| `B3obsUO` | plus the true **buildings** |
+| `B3` | plus exact positions inside each 200 m cell, the true crowd size and every person's needs |
+
+**Results, validation (20 scenarios, seeds 100-119, profile `rl_static`), paired with the AI E5a:**
+
+| Pilot | Coverage | vs the AI (paired) |
+|---|---|---|
+| B3 (everything) | 0.659 | +0.104* |
+| B3obsUO (maps uncapped + buildings) | 0.629 | +0.074* |
+| B3obsU (maps uncapped) | 0.613 | +0.059* |
+| **B3obs (exactly what the AI sees)** | **0.605** | **+0.050*** |
+| B2 (k-means, true positions) | 0.610 | +0.055* |
+| AI E5a | 0.555 | |
+| Random | 0.430 | -0.125* |
+
+On 20 *training* scenarios (seeds 0-19, which are harder for every pilot): B3 0.603, B3obsU 0.586, B3obsUO 0.581, B3obs 0.561,
+B2 0.568, AI 0.538 (AI vs B3obs -0.023*). Steps along the ladder that are significant: cap removal +0.025* (train only), last
+rung (exact positions, crowd size, needs) +0.030* val and +0.022* train; the buildings step is not significant on either split.
+
+| Gap AI to B3 | caused by missing information (B3obs to B3) | caused by the AI not using what it sees (AI to B3obs) |
+|---|---|---|
+| validation 0.104 | 0.054 | 0.050 |
+| training 0.065 | 0.042 | 0.023 |
+
+**Train vs validation (is it memorising?).** The same models on 20 training scenarios and the 20 validation scenarios, as
+a share of B3's score: goto_hold10 0.78 / 0.80, e3 CNN 0.88 / 0.83, e5a CNN 0.89 / 0.84, e4 CNN 20 x 20 0.89 / 0.83. The AI is
+clearly behind B3 **even on scenarios it trained on** (e5a -0.065*), so the main problem is **underfitting** (it has not
+learned the task well), not memorising. The CNNs lose a little more on new scenarios (about 0.04 in the gap to B3); whether
+that difference is significant was not tested.
+
+**What the capped map hides.** On the 10 x 10 map, 3.4 cells per scenario read "full" on average and they hold 59% of all
+people; the densest cell holds 25% on average (up to 54%). Parking over the best "full" cell gives 0.616 coverage, over the
+worst 0.435, and the AI cannot tell them apart. But the 20 x 20 map mostly removes the saturation (22% of people in full
+cells) and the AI scored the same (0.545), so the cap is not the main limit.
+
+**The key insight.** B3 often parks **between** crowds, sometimes over an almost empty cell (its own cell is "full" in only
+17 of 40 scenarios, but a neighbouring cell is in 35 of 40), so one footprint reaches several crowds. Flying to the truly
+densest cell gives only 0.565, which is where every AI version stalls (0.53-0.56). **The AI has learned "go to the crowd",
+not "find the spot that reaches several crowds".**
+
+**What it means.**
+1. The plateau is **half information, half learning.** A one-step search with only the AI's maps reaches 0.605, level with B2.
+   So better learning with the *current* inputs could plausibly reach about 0.60, i.e. match B2 and pass G4; matching B3 needs
+   more information (finer positions and the crowd size matter most; buildings least).
+2. G4 as defined (match B2) is therefore **not impossible by design**: an information-matched search already matches B2.
+3. For step 4 of the plan: an uncapped map is cheap and correct to add; an obstacle map is the least promising extra input; a
+   finer map or a count of people (which a base station knows from connected users) are more promising.
+
+**Sensitivity check (mine, after the agents' runs):** B3obs with an assumed crowd of 200 / 500 / 1,000 people scores
+0.588 / 0.605 / 0.606 on validation, always above the AI's 0.555, so the conclusion does not depend on that assumption.
+
+**Who did what.** Two agents worked in parallel (owner's request): one built the three pilots, their tests and the ladder
+runs; the other ran the train/validation check and measured the map cap. I reviewed the code (the pilots read only what
+their rung allows), re-ran the 500-person result (identical), ran the sensitivity check and wrote this section.
+
+Reproduce: `python rl_eval.py --policies Random,B0,B2,B3,B3obs,B3obsU,B3obsUO --split val --model results/rl/e5a_cnn_150k/model.zip`
+(and `--split train --seeds 20`). Tests: 19 new in `test_baselines.py` (the pilots ignore everything outside their rung).
+
 ## 8.5 Validation table: `goto_hold10`
 
 Split: val (20 scenarios, seeds 100-119). Profile: rl_static. Controls: goto. Area 2000 m, 20 dBm, battery 16 Wh.

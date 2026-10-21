@@ -231,3 +231,126 @@ def test_b6_targets_stay_inside_the_allowed_space():
     pol.plan(env)
     x, y, h = pol.target
     assert 0 <= x <= env.L and 0 <= y <= env.L and h in BCFG["altitude_levels_m"] + [env.h]
+
+
+# ---------------------------------------------------------------- information ladder: B3obs, B3obsU, B3obsUO
+LADDER = ("B3obs", "B3obsU", "B3obsUO")
+
+
+def _plan(name, env):
+    pol = make_policy(name)
+    pol.reset(env)
+    pol.plan(env)
+    return pol.target
+
+
+def test_allocate_is_exact_proportional_and_deterministic():
+    from baselines import allocate
+    c = allocate(np.array([1.0, 1.0, 2.0, 0.0]), 10)
+    assert c.sum() == 10 and c[3] == 0 and c[2] == 5 and sorted(c[:2]) == [2, 3]
+    assert (allocate(np.array([1.0, 1.0, 2.0, 0.0]), 10) == c).all()
+    assert allocate(np.zeros(4), 10).sum() == 0
+
+
+def test_pseudo_population_has_the_configured_size_and_valid_class_probabilities():
+    from baselines import B3Obs, pseudo_population
+    env = _env()
+    xy, probs = pseudo_population(env, *B3Obs().maps(env))
+    assert len(xy) == BCFG["obs_pseudo_users"] and len(xy) % 2 == 0
+    assert probs.shape == (len(xy), len(md.CFG["classes"])) and np.allclose(probs.sum(axis=1), 1.0)
+    r = list(md.CFG["classes"]).index("rescue")
+    assert (probs[:, r] == 1).sum() == round(BCFG["obs_pseudo_users"] * md.CFG["classes"]["rescue"]["share"])
+    assert ((0 <= xy) & (xy <= env.L)).all()
+
+
+def test_b3obs_reads_exactly_the_agents_maps():
+    from baselines import B3Obs
+    env = _env()
+    a, r = B3Obs().maps(env)
+    obs = env.observation(("heat_all", "heat_rescue"))
+    assert np.array_equal(np.concatenate([a, r]), obs.astype(float))
+    assert a.max() <= 1.0                                                  # capped, like the agent's view
+
+
+def test_uncapped_maps_are_true_shares_and_differ_from_the_capped_view_on_one_dominant_cell():
+    from baselines import B3Obs, B3ObsUncapped
+    env = _env(scenario_overrides={"n_clusters": 1, "cluster_radius_m": 20.0, "scatter_fraction": 0.1})
+    capped, _ = B3Obs().maps(env)
+    true, true_r = B3ObsUncapped().maps(env)
+    assert true.sum() == pytest.approx(1.0) and true_r.sum() == pytest.approx(1.0)
+    assert true.max() > 0.5                                                # one cell holds most users
+    assert capped.max() == 1.0                                             # ... but the agent's map saturates
+    # in the capped view the crowd's cell weighs far less relative to the scattered users
+    assert capped.max() / capped.sum() < true.max() / true.sum() - 0.2
+
+
+def _moved_within_cells(env):
+    """Move every user to the centre of its heatmap cell (same maps, different exact positions)."""
+    from baselines import cell_centres
+    xy = env.user_xy()
+    ix = np.clip((xy / (env.L / env.grid)).astype(int), 0, env.grid - 1)
+    return cell_centres(env)[ix[:, 0] * env.grid + ix[:, 1]]
+
+
+@pytest.mark.parametrize("name", ["B3obs", "B3obsU"])
+def test_ladder_ignores_hidden_information(name):
+    for seed in (2, 3, 4):
+        env = _env(seed=seed)
+        before = _plan(name, env)
+        env.P = env.P.copy()
+        env.P[env.t] = _moved_within_cells(env)                            # exact positions inside cells
+        env.min_rate = np.full_like(env.min_rate, 10 ** 9)                 # every class hidden
+        env.boxes = np.array([[0.0, 0.0, env.L, env.L]])                   # a wall over everything
+        assert _plan(name, env) == before
+
+
+def test_b3obsuo_does_see_obstacles():
+    from baselines import B3ObsUncappedObstacles
+    env = _env(seed=3)
+    pol = B3ObsUncappedObstacles()
+    pol.reset(env)
+    X, Y = np.array([env.x, 100.0]), np.array([env.y, 900.0])
+    H = np.full(2, BCFG["altitude_m"])
+    open_sky = pol.score(env, X, Y, H, env.p_max_w)
+    env.boxes = np.array([[0.0, 0.0, env.L, env.L]])
+    assert (pol.score(env, X, Y, H, env.p_max_w) < open_sky).any()
+    # and it still ignores exact positions inside cells and the users' classes
+    env = _env(seed=3)
+    before = _plan("B3obsUO", env)
+    env.P = env.P.copy()
+    env.P[env.t] = _moved_within_cells(env)
+    env.min_rate = np.full_like(env.min_rate, 10 ** 9)
+    assert _plan("B3obsUO", env) == before
+
+
+def test_b3obs_does_see_the_rescue_map():
+    from baselines import B3Obs
+    env = _env(seed=3)
+    pol = B3Obs()
+    pol.reset(env)
+    X, Y, H = np.array([env.x, 100.0, 900.0]), np.array([env.y, 900.0, 100.0]), np.full(3, BCFG["altitude_m"])
+    before = pol.score(env, X, Y, H, env.p_max_w)
+    env.rescue = ~env.rescue                                               # a different rescue map
+    assert not np.allclose(pol.score(env, X, Y, H, env.p_max_w), before)
+
+
+@pytest.mark.parametrize("name", ("B3",) + LADDER)
+def test_with_one_tight_crowd_every_rung_goes_to_it(name):
+    env = _env(seed=3, scenario_overrides={"n_clusters": 1, "cluster_radius_m": 30.0, "scatter_fraction": 0.0,
+                                           "n_obstacles": 0})
+    crowd = env.user_xy().mean(axis=0)
+    pol = make_policy(name)
+    pol.reset(env)
+    pol.power = 1e-3          # 0 dBm: at full power coverage is nearly flat on the 1 km map, position barely matters
+    pol.plan(env)
+    x, y, _ = pol.target
+    spacing = env.L / (BCFG["grid_n"] - 1)
+    assert np.hypot(x - crowd[0], y - crowd[1]) < spacing                   # the nearest grid point or better
+
+
+def test_b3_refactor_kept_b3_scoring_on_the_true_model():
+    env = _env(seed=3)
+    pol = B3GridSearch()
+    pol.reset(env)
+    X, Y, H = np.array([env.x, 100.0]), np.array([env.y, 900.0]), np.full(2, BCFG["altitude_m"])
+    assert np.array_equal(pol.score(env, X, Y, H, env.p_max_w), env.evaluate(X, Y, H, env.p_max_w))

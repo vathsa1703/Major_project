@@ -7,6 +7,8 @@ Each one drives the SAME UAVEnv through env.step(), so comparisons are fair.
 
 Baselines may look at the true user positions (privileged information); the RL agent only sees heatmaps.
 That makes them a strong test: RL has to beat them, not B0 (a drone that does nothing).
+The information ladder B3obs -> B3obsU -> B3obsUO -> B3 runs B3's exact search with less information (only the agent's
+capped maps; uncapped maps; plus obstacles; full truth), to tell whether the agent is limited by what it can see.
 All settings are in config.yaml under `baselines:`.
 """
 import numpy as np
@@ -127,14 +129,125 @@ class B3GridSearch(Policy):
     Oracle-ish and slow, on purpose."""
     name = "B3"
 
+    def score(self, env, X, Y, H, p_w):
+        """Coverage at every candidate. B3 uses the env's true model (true users, obstacles and classes)."""
+        return env.evaluate(X, Y, H, p_w)
+
     def plan(self, env):
         X, Y = _grid(env)
         X, Y = np.append(X, env.x), np.append(Y, env.y)
         p_w = env.p_max_w * self.power
-        cov = env.evaluate(X, Y, np.full(len(X), BCFG["altitude_m"]), p_w)
+        cov = self.score(env, X, Y, np.full(len(X), BCFG["altitude_m"]), p_w)
         best = np.flatnonzero(cov >= cov.max() - 1e-12)
         j = best[np.argmin(np.hypot(X[best] - env.x, Y[best] - env.y))]      # ties: the closest one
         self.target = (X[j], Y[j], BCFG["altitude_m"])
+
+
+# ---------------------------------------------------------------- information ladder: B3 with less information
+def cell_shares(env, xy):
+    """UNCAPPED version of the agent's heatmap: share of the users in each grid cell (same cells and order as
+    env._heatmap, which multiplies this by 10 and caps it at 1)."""
+    if len(xy) == 0:
+        return np.zeros(env.grid**2)
+    h, _, _ = np.histogram2d(xy[:, 0], xy[:, 1], bins=env.grid, range=[[0, env.L], [0, env.L]])
+    return h.ravel() / len(xy)
+
+
+def cell_centres(env):
+    """(grid*grid, 2) centres of the heatmap cells, in the heatmap's ravel order (x index major)."""
+    c = (np.arange(env.grid) + 0.5) * env.L / env.grid
+    CX, CY = np.meshgrid(c, c, indexing="ij")
+    return np.column_stack([CX.ravel(), CY.ravel()])
+
+
+def allocate(weights, n):
+    """Split n pseudo-users over cells proportionally to `weights` (largest-remainder rounding, deterministic).
+    All-zero weights -> nobody."""
+    weights = np.asarray(weights, dtype=float)
+    if n <= 0 or weights.sum() <= 0:
+        return np.zeros(len(weights), int)
+    q = weights / weights.sum() * n
+    counts = np.floor(q).astype(int)
+    extra = n - counts.sum()
+    counts[np.argsort(-(q - counts), kind="stable")[:extra]] += 1
+    return counts
+
+
+def pseudo_population(env, all_map, rescue_map):
+    """A stand-in crowd of `obs_pseudo_users` users at the heatmap cell centres, built only from two maps.
+    Rescue pseudo-users (prior share of the rescue class from config) are placed by the rescue map, the others
+    by the all-users map. Returns xy (n, 2) and class_probs (n, n_classes): rescue users are certainly rescue,
+    the others follow the config class mix over the non-rescue classes (the agent cannot see their classes)."""
+    n = BCFG["obs_pseudo_users"]
+    assert n % 2 == 0, "obs_pseudo_users must be even (NOMA pairs)"
+    names = list(md.CFG["classes"])
+    shares = np.array([md.CFG["classes"][c]["share"] for c in names], dtype=float)
+    shares = shares / shares.sum()
+    r = names.index("rescue")
+    n_rescue = int(round(n * shares[r])) if np.sum(rescue_map) > 0 else 0
+    counts_r, counts_o = allocate(rescue_map, n_rescue), allocate(all_map, n - n_rescue)
+    centres = cell_centres(env)
+    xy = np.vstack([np.repeat(centres, counts_r, axis=0), np.repeat(centres, counts_o, axis=0)])
+    prior = shares.copy()
+    prior[r] = 0.0
+    prior = prior / prior.sum()
+    probs = np.vstack([np.tile(np.eye(len(names))[r], (counts_r.sum(), 1)), np.tile(prior, (counts_o.sum(), 1))])
+    return xy, probs
+
+
+def expected_coverage(env, xy, class_probs, X, Y, H, p_w, boxes=None):
+    """Expected share of pseudo-users served at each candidate (X, Y, H): a pseudo-user counts with the probability
+    that its class's min rate is met. Same physics path and rng recipe as UAVEnv.evaluate (channel_gain +
+    noma_rates, env.access noma/oma, seeded by (scenario, t)); bandwidth follows make_scenario's rule
+    (pseudo count x bandwidth_per_user_hz)."""
+    X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
+    if len(xy) < 2:
+        return np.zeros(len(X))
+    min_rates = np.array([c["min_rate_bps"] for c in md.CFG["classes"].values()], dtype=float)
+    gains = md.channel_gain(xy[:, 0], xy[:, 1], X, Y, H, boxes)
+    rng = np.random.default_rng([env.scenario_seed, env.t])
+    pick = 0 if env.access == "noma" else 1
+    bw = len(xy) * md.CFG["bandwidth_per_user_hz"]
+    return np.array([
+        ((md.noma_rates(g, p_w, env.noise_psd, bw, env.sc["pairing"], rng)[pick][:, None] >= min_rates)
+         * class_probs).sum(axis=1).mean() for g in gains])
+
+
+class B3Obs(B3GridSearch):
+    """B3obs (information ladder, rung 1): B3's search, but it knows ONLY what the RL agent sees: the two observed
+    heatmaps (share of users per cell x10, CAPPED at 1; all users and rescue users), taken from env.observation().
+    It scores candidates on a pseudo-crowd of `obs_pseudo_users` users at the cell centres, weighted by the
+    capped cell values (see pseudo_population): no true positions, no true crowd size, no obstacles, no classes
+    beyond the rescue map (config class mix as a prior). Everything else (grid, altitude, power, rhythm, tie-break,
+    go_to, physics) is B3's. It also uses its own position and t (the agent sees both) and the scenario seed, which
+    only seeds random pairing (unused with pairing: extreme)."""
+    name = "B3obs"
+    use_boxes = False
+
+    def maps(self, env):
+        o = env.observation(("heat_all", "heat_rescue")).astype(float)
+        return o[: env.grid**2], o[env.grid**2:]
+
+    def score(self, env, X, Y, H, p_w):
+        xy, probs = pseudo_population(env, *self.maps(env))
+        return expected_coverage(env, xy, probs, X, Y, H, p_w, env.boxes if self.use_boxes else None)
+
+
+class B3ObsUncapped(B3Obs):
+    """B3obsU (rung 2): B3obs with the heatmaps UNCAPPED (true share of users per cell, not x10 capped at 1).
+    The pseudo-crowd size stays obs_pseudo_users, so the ONLY difference from B3obs is the saturation cap."""
+    name = "B3obsU"
+
+    def maps(self, env):
+        xy = env.user_xy()
+        return cell_shares(env, xy), cell_shares(env, xy[env.rescue])
+
+
+class B3ObsUncappedObstacles(B3ObsUncapped):
+    """B3obsUO (rung 3): B3obsU plus the true obstacles (env.boxes). Still cell-centre pseudo-users, assumed crowd
+    size and class prior; full B3 adds true positions inside cells, the true crowd size and the true classes."""
+    name = "B3obsUO"
+    use_boxes = True
 
 
 class B6GridAltitude(Policy):
@@ -220,7 +333,7 @@ class B5EnergyAware(Policy):
 
 
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
-            "B6": B6GridAltitude}
+            "B6": B6GridAltitude, "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles}
 
 
 def make_policy(name):
