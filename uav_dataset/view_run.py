@@ -46,9 +46,10 @@ def build_policy(name, model_path=None, controls=None, hold=None):
     raise ValueError(f"unknown policy {name!r}; choose from {sorted(POLICIES)} + random, ppo")
 
 
-def run(seed, pilot, battery_wh=None, overrides=None):
-    """Play one episode. Returns the env and one frame per step."""
-    env = UAVEnv(battery_wh=battery_wh, scenario_overrides=overrides)
+def run(seed, pilot, battery_wh=None, overrides=None, access=None):
+    """Play one episode. Returns the env and one frame per step. access: noma | oma | oma_opt | noma_opt
+    (default: config env.access)."""
+    env = UAVEnv(battery_wh=battery_wh, scenario_overrides=overrides, access=access)
     env.reset(seed=seed)
     pilot.reset(env)
     frames, done = [], False
@@ -57,6 +58,37 @@ def run(seed, pilot, battery_wh=None, overrides=None):
         frames.append((env.user_xy().copy(), info["served"].copy(), (env.x, env.y, env.h), dict(info), r))
         done = term or trunc
     return env, frames
+
+
+def animate(env, frames, out, label, policy, every=5, fps=6):
+    """Save the run as a GIF (every `every`-th second plus the last one) and the last frame as <out>_last.png."""
+    L = env.L
+    rescue = env.rescue
+    fig, ax = plt.subplots(figsize=(6.2, 6.2))
+
+    def draw(i):
+        ax.clear()
+        xy, served, (x, y, h), info, _ = frames[i]
+        for x0, y0, x1, y1 in env.boxes:
+            ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, color="0.6", alpha=0.7))
+        ax.scatter(xy[:, 0], xy[:, 1], s=6, c=np.where(served, "tab:green", "tab:red"))
+        ax.scatter(xy[rescue, 0], xy[rescue, 1], s=24, facecolors="none", edgecolors="k", linewidths=0.6)
+        trail = np.array([f[2][:2] for f in frames[: i + 1]])
+        ax.plot(trail[:, 0], trail[:, 1], "b-", lw=1)
+        ax.plot([x], [y], marker="^", color="blue", markersize=14)
+        ax.set_xlim(0, L)
+        ax.set_ylim(0, L)
+        ax.set_aspect("equal")
+        ax.set_title(f"{label} ({info['mobility']}, {info['n_users']} users) pilot={policy}\n"
+                     f"t={info['t']}s  coverage={info['coverage']:.2f}  battery={info['battery_wh']:.1f} Wh "
+                     f"h={h:.0f} m", fontsize=9)
+
+    idx = list(range(0, len(frames), every)) + [len(frames) - 1]
+    FuncAnimation(fig, lambda k: draw(idx[k]), frames=len(idx)).save(str(out), writer=PillowWriter(fps=fps))
+    draw(len(frames) - 1)
+    fig.savefig(str(out).replace(".gif", "_last.png"), dpi=100)
+    plt.close(fig)
+    return out
 
 
 def main():
@@ -82,31 +114,7 @@ def main():
     overrides = {field: getattr(a, flag) for flag, field in OVERRIDE_FLAGS.items() if getattr(a, flag) is not None}
     env, frames = run(a.seed, build_policy(a.policy, a.model, a.controls, a.hold), a.battery_wh, overrides)
 
-    L = md.CFG["area_m"]
-    rescue = env.rescue
-    fig, ax = plt.subplots(figsize=(6.2, 6.2))
-
-    def draw(i):
-        ax.clear()
-        xy, served, (x, y, h), info, _ = frames[i]
-        for x0, y0, x1, y1 in env.boxes:
-            ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, color="0.6", alpha=0.7))
-        ax.scatter(xy[:, 0], xy[:, 1], s=6, c=np.where(served, "tab:green", "tab:red"))
-        ax.scatter(xy[rescue, 0], xy[rescue, 1], s=24, facecolors="none", edgecolors="k", linewidths=0.6)
-        trail = np.array([f[2][:2] for f in frames[: i + 1]])
-        ax.plot(trail[:, 0], trail[:, 1], "b-", lw=1)
-        ax.plot([x], [y], marker="^", color="blue", markersize=14)
-        ax.set_xlim(0, L)
-        ax.set_ylim(0, L)
-        ax.set_aspect("equal")
-        ax.set_title(f"seed {a.seed} ({info['mobility']}, {info['n_users']} users) pilot={a.policy}\n"
-                     f"t={info['t']}s  coverage={info['coverage']:.2f}  battery={info['battery_wh']:.1f} Wh "
-                     f"h={h:.0f} m", fontsize=9)
-
-    idx = list(range(0, len(frames), 5)) + [len(frames) - 1]
-    FuncAnimation(fig, lambda k: draw(idx[k]), frames=len(idx)).save(a.out, writer=PillowWriter(fps=6))
-    draw(len(frames) - 1)
-    fig.savefig(a.out.replace(".gif", "_last.png"), dpi=100)
+    animate(env, frames, a.out, f"seed {a.seed}", a.policy)
     cov = np.mean([f[3]["coverage"] for f in frames])
     left = frames[-1][3]["battery_wh"]
     print(f"{len(frames)} steps, mean coverage {cov:.3f}, battery left {left:.2f} Wh, saved {a.out}")
