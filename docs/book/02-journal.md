@@ -387,3 +387,13 @@ learning. The AI is behind even on scenarios it trained on (underfitting). The m
 but a 20 x 20 map did not help, and B3's real trick is parking *between* crowds, which the AI never learned. I checked the
 code, reproduced the main number and showed it does not depend on the assumed crowd size (0.588-0.606).
 
+### 46. Owner's decisions, a second review, and two tracks in parallel
+The owner merged PR #10, answered the four questions of Chapter 14.7 (D-38) and asked me to discuss the next designs with
+another agent before building, in case it had a better idea. It did. I gave a reviewer my designs for adaptive NOMA and for a
+better learner; it ran the real code and found three flaws in the NOMA design (D-39) and one in the learner design (a privileged
+critic helps in SAC, hardly in PPO; D-40). I questioned it on speed and training cost; it measured both and we agreed the specs.
+Two agents now build the tracks in parallel, each in its own copy of the repository: Track 1 adaptive NOMA vs equally optimised
+OMA; Track 2 the better learner. The physics default stays as it is while G4 is open (D-41).
+The owner also asked how far the project is from completion: about 55-60% of the core; 5-7 weeks of focused work for the
+research question (tracks 1 and 2, G5 on moving crowds, final evaluation), 10-12 weeks with the extras and the flying sim.
+

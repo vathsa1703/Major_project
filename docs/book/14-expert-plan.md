@@ -151,4 +151,13 @@ D-24; steps 3 and 5 add pilots, not hints.
   with B2, so G4 is reachable in principle. Consequences for step 4: remove the map cap and give the AI a finer map or a
   count of people; an obstacle map is the least promising input. The learning half points at the action design (the AI aims
   at the densest cell instead of a spot between crowds), which is exactly where owner decisions 1 and 2 in 14.7 matter.
+- **Owner's decisions (2026-10-21), D-38:** asymmetric critic yes; cell action head no; hierarchical later; move to moving
+  crowds after tracks 1 and 2.
+- **Second review before tracks 1 and 2 (2026-10-21).** Before writing code I sent the concrete designs for adaptive NOMA (step 2)
+  and the better learner (step 4) to a new reviewer agent, then questioned its answers. It ran the real code on 5 scenarios and
+  found that my NOMA design was flawed (per-pair choice decided in advance, wrong admission order, a split formula that assumed
+  equal power per pair) and that a privileged critic does little in PPO but a lot in SAC. One snapshot of its measurements
+  (best spot per scheme, 5 validation scenarios, 20 dBm): today's NOMA 0.56-0.80, today's OMA 0.46-0.74, optimised OMA
+  0.68-0.91, adaptive NOMA 0.75-0.96 (0.71-0.90 with imperfect SIC). These are a reviewer's quick check, not results; the real
+  runs are in Track 1. The agreed designs are D-39, D-40 and D-41; both tracks now run in parallel.
 
