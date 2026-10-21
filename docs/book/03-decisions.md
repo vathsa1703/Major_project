@@ -47,6 +47,7 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-39 | 10-21 | Adaptive NOMA design after a second review: admit-then-pair, minimum-power closed form, imperfect SIC from the start, same slot rule for both schemes | Claude + reviewer |
 | D-40 | 10-21 | Better-learner design after a second review: uncapped map, crowd size, own measurement history, fresh seeds, SAC with a training-only privileged critic | Claude + reviewer |
 | D-41 | 10-21 | The physics default stays `access: noma` until G4 is closed, so the bars the AI is judged against do not move | Claude + reviewer |
+| D-42 | 10-21 | Adaptive NOMA added as `noma_opt` (with `oma_opt` as its fair reference); default unchanged; G5 default is the owner's call | Claude |
 
 ---
 
@@ -266,4 +267,10 @@ Both schemes are optimised the same way (`oma_opt`, `noma_opt`); leftover power 
 ### D-41 Keep `access: noma` while G4 is open
 Adaptive NOMA changes coverage by 10-25 points and moves the best spots, so it would change B2, B3 and B3obs, the bars the AI is
 judged against. Track 2 trains and evaluates with today's NOMA; the project default for G5 is decided after Track 1's results.
+
+### D-42 Adaptive NOMA is an option, not yet the default
+`noma_opt` and `oma_opt` are new values of `env.access`; `sic_eps: 0.0` and `rescue_first: false` are new settings under
+`access:` (engineering assumptions). The default stays `noma` (D-41), so every earlier number is unchanged and reproducible.
+Before G5 the owner chooses the project default once. My recommendation: `noma_opt` with `sic_eps: 0.05` (realistic, still
+beats optimised OMA) and `rescue_first: true` (fits a disaster mission), reported next to `oma_opt` so H3 stays a fair test.
 

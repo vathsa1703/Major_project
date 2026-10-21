@@ -121,6 +121,7 @@ fix.
 - Make your own: `python noma_picture.py --seed <n> [--profile <name>] [--x X --y Y --h H]`.
 
 ## 13.8 Next steps for NOMA (roadmap stage B)
+*(Update 2026-10-21: items 1 and 4 (imperfect SIC) are done, see 13.9.)*
 1. **Choose the power split per pair** instead of a fixed 80/20: for example a closed-form split that gives each weak user just
    its minimum rate and the rest to the strong user, and later the AI choosing it. Expected to remove the 232 kbps ceiling and the
    coverage loss at full power.
@@ -130,8 +131,85 @@ fix.
 4. **Imperfect SIC** (a residual factor) and **bit-error rate** as ablations. Only then do real SIC failures appear.
 5. Report H3 with all of the above, with 5 seeds for any AI result.
 
-## 13.9 How to explain it to an examiner
+## 13.9 Adaptive NOMA vs equally optimised OMA (Track 1, 2026-10-21)
+**Plain words.** Until now every pair of users got the same power and the same fixed 80/20 split, whatever they needed. Now the
+drone works out, for every person, the *least* power that still gives them the speed they need, serves the cheapest people
+first until the power runs out, and only then pairs them up for NOMA. To be fair, OMA gets exactly the same treatment. The
+question becomes: when both are run as well as possible, does NOMA still serve more people?
+
+**How it works (`access_rates()` in `make_dataset.py`, D-39).** Two new access schemes; the old `noma` and `oma` are unchanged
+(byte-identical code, and the old numbers reproduce exactly).
+- `oma_opt`: every user has its own slice b = B/N. Minimum power for user i: p_i = (2^(R_i/b) - 1) x noise x b / g_i. Users are
+  admitted cheapest-first while the total stays within the drone's power P (this is provably the best way to maximise the number
+  served). Leftover power is shared by scaling every admitted user's power by the same factor.
+- `noma_opt`: the same cheapest-first order, but the admitted users are paired strongest-with-weakest on a double slice 2b,
+  and each pair gets its **minimum NOMA power** in closed form, with an imperfect-SIC residual eps (the share of the removed
+  signal that stays behind):
+  ```
+  p_s = gamma_s N (eps gamma_w / g_w + 1 / g_s) / (1 - eps gamma_s gamma_w)      (strong user)
+  p_w = gamma_w (p_s + N / g_w)                                                (weak user)
+  gamma = 2^(R / 2b) - 1,  N = noise power on 2b
+  ```
+  If NOMA would cost more than serving the two users separately (possible only when eps > 0), the pair uses OMA inside its slot.
+  The largest number of users that fits is found by binary search. Unserved users' slots are wasted in **both** schemes.
+- Options: `sic_eps` (0 or 0.05, engineering assumption) and `rescue_first` (admit rescue users before everyone else).
+- Checks: 45 new tests, including brute force on small crowds (`oma_opt` exact; `noma_opt` within one user), every rate
+  recomputed from the returned powers, SIC decoding always possible, more power never serves fewer people. I also re-derived the
+  closed form independently: rates come out exact to 1e-15 over 2,000 random pairs.
+
+**Results in the game** (100 scenarios, 16 Wh, every pilot survives; `*` = significant after Holm correction over all 60
+comparisons of the table):
+
+| Profile, pilot | OMA | NOMA (fixed) | OMA optimised | **NOMA adaptive** | adaptive NOMA minus optimised OMA |
+|---|---|---|---|---|---|
+| lowpower (20 dBm), B0 | 0.745 | 0.797 | 0.893 | **0.944** | +0.051* |
+| lowpower, B2 | 0.769 | 0.835 | 0.924 | **0.962** | +0.039* |
+| lowpower, B3 | 0.808 | 0.865 | 0.945 | **0.983** | +0.038* |
+| hard (2 x 2 km, 20 dBm), B0 | 0.420 | 0.428 | 0.658 | **0.690** | +0.032* |
+| hard, B2 | 0.568 | 0.633 | 0.777 | **0.811** | +0.034* |
+| hard, B3 | 0.616 | 0.675 | 0.808 | **0.849** | +0.041* |
+
+Same runs, other measures (B3 shown; B0 and B2 behave the same way):
+
+| B3 | total speed (Mbps) | fairness (Jain) | rescue users not served |
+|---|---|---|---|
+| lowpower: NOMA fixed / OMA opt / **NOMA adaptive** | 218.4 / 71.3 / **93.1** | 0.751 / 0.409 / **0.472** | 0.190 / 0.030 / **0.004** |
+| hard: NOMA fixed / OMA opt / **NOMA adaptive** | 155.8 / 45.9 / **54.0** | 0.592 / 0.340 / **0.356** | 0.506 / 0.287 / **0.203** |
+
+Against optimised OMA, adaptive NOMA is better on **every** measure in every case (coverage +0.03 to +0.05, total speed +5 to
++23 Mbps, fairness and rescue outage better, all significant). One snapshot at 30 dBm (default scenarios, 20 validation maps):
+adaptive NOMA 1.000 vs optimised OMA 0.989, while fixed NOMA still trails OMA (0.913 vs 0.933). **The 232 kbps ceiling of
+13.6 is gone.**
+
+Charts: [8_access_schemes_hard.png](figures/8_access_schemes_hard.png),
+[9_access_schemes_lowpower.png](figures/9_access_schemes_lowpower.png).
+
+**Imperfect SIC (eps = 0.05, hard).** Adaptive NOMA loses 0.014-0.024 coverage and 16-36% of pairs switch to OMA inside the
+pair, but it still beats optimised OMA by +0.016 to +0.018*. **Rescue first (hard).** With adaptive NOMA, rescue outage drops
+sharply (B3 0.203 to 0.117, B2 0.258 to 0.169) for a small coverage loss (0.011-0.029); with optimised OMA the same rule costs
+0.11-0.20 coverage, because a far rescue user is very expensive alone, while in NOMA the pairing absorbs that cost.
+
+**The honest trade-off.** The optimised schemes give everyone just their minimum speed and spend the rest of the power reaching
+far, expensive users. So compared with the old fixed schemes they **serve far more people (+0.12 to +0.26) but deliver about
+55-65% less total speed and lower fairness**. This is a property of the goal "serve as many people as possible", not of NOMA.
+In a disaster that goal is the right one (a survivor with a working connection matters more than a fast connection for
+someone already served), but the report must say "more people served, less total speed", not "better on every metric".
+
+**What is not verified.** The binary search can miss a few users at single candidate spots (up to 4% of N measured, mean about
+0.1%, and 0 at every best spot); it can only under-count adaptive NOMA, so its advantage is if anything understated. "Within
+one user of the optimum" is shown on small crowds, not proven. About 10-17% of NOMA pairs give the weak user less than half the
+power (fine in theory; practical receivers sometimes assume otherwise; no clamp tested). sic_eps and the minimum rates are
+engineering assumptions. The game runs use seeds 0-99 like the earlier H3 runs.
+
+**Reproduce:** `python noma_vs_oma.py --profile hard --schemes oma,oma_opt,noma,noma_opt` (also `--profile lowpower`,
+`--eps 0.05`, `--rescue_first`), and `python access_benchmark.py`.
+
+## 13.10 How to explain it to an examiner
 "NOMA lets two users share one frequency slice by splitting power; the strong user removes the weak user's signal with SIC. In our
 simulator NOMA always increases total throughput by about 20-27%, and it serves more users when transmit power is limited. With a
 fixed 80/20 split the weak user's SINR is capped at 4, so its rate cannot exceed 232 kbps, which is why OMA can cover slightly more
 users at full power. That is why the next step is adaptive power allocation per pair."
+
+Since Track 1: "When both schemes allocate power optimally to serve as many users as possible, NOMA still serves 3-5
+more users per 100 than OMA, with more throughput and fewer unserved rescue users; imperfect SIC halves but does not
+remove that gain. The price of the coverage objective, for both schemes, is lower total throughput."

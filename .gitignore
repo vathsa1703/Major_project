@@ -3,6 +3,7 @@ uav_dataset/data/
 uav_dataset/data_v1/
 *.xlsx
 *.gif
+!docs/book/figures/gifs/*.gif
 
 # logs and caches
 *.log

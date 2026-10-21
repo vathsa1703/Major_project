@@ -397,3 +397,17 @@ OMA; Track 2 the better learner. The physics default stays as it is while G4 is 
 The owner also asked how far the project is from completion: about 55-60% of the core; 5-7 weeks of focused work for the
 research question (tracks 1 and 2, G5 on moving crowds, final evaluation), 10-12 weeks with the extras and the flying sim.
 
+### 47. Track 1 done: adaptive NOMA beats equally optimised OMA
+The Track 1 agent built two new access schemes (`oma_opt`, `noma_opt`) exactly as agreed in D-39, with 45 tests, and ran them
+in the game on 100 scenarios per profile while the AI trained alongside (about 1.5 hours in total on the shared laptop). Result
+(Chapter 13.9): with both schemes optimised the same way, NOMA serves 3-5 more people per 100 for every pilot, with more total
+speed, better fairness and fewer unserved rescue users; B3 on lowpower reaches 98.3% coverage. Imperfect SIC (eps 0.05) halves
+the gain but does not remove it. The catch, for both optimised schemes: much less total speed than the old fixed schemes. I
+checked the work: the old schemes are byte-identical and reproduce the Chapter 13 numbers, 227 tests pass, and I re-derived
+the power formula independently (exact to 1e-15 on 2,000 random pairs).
+
+
+### 48. The GIFs were never on GitHub (found and fixed)
+Building the PDF from a clean copy of the repository showed 22 pictures instead of 26: the 6 GIFs of the book had never been
+committed, because `.gitignore` ignores every `*.gif` (a rule from the start, meant for viewer output). They existed only on the
+owner's laptop. Fixed with an exception for `docs/book/figures/gifs/`; the 6 GIFs (4.7 MB) are now in the repository.
