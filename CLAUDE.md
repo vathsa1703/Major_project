@@ -93,7 +93,10 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
   STEP 5 DONE (book 7.10, 4.7): `uav.a_max_mps2` (null = off), `energy.accel_power` load factor (our extension), B7
   circling pilot: +25.6% people-seconds per battery (run-to-empty), +0.08-0.12 coverage at 12-13 Wh; robust +21..31%.
   G5 SETTINGS (D-48): noma_opt, sic_eps 0.05, rescue_first, a_max 4 (switch the defaults + rerun baselines first).
-  Roadmap stages 0-5 in docs/roadmap.md (D-50); dashboard (Streamlit) being built in parallel.
+  Roadmap stages 0-5 in docs/roadmap.md (D-50); dashboard merged (`streamlit run uav_dataset/dashboard.py`).
+  STEP 3 DONE (book 7.11, D-51): clairvoyant pilot (oracle.py) beats B6 by only +0.002 on `hard` (every crowd type < 0.02):
+  NO ROOM FOR ANTICIPATION in today's scenarios. G5 must NOT start on them; redesign first (owner chooses: tight battery,
+  competing crowds, sudden events, narrower footprints) and re-run the clairvoyant test.
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.

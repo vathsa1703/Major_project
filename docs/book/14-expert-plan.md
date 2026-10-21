@@ -160,4 +160,12 @@ D-24; steps 3 and 5 add pilots, not hints.
   (best spot per scheme, 5 validation scenarios, 20 dBm): today's NOMA 0.56-0.80, today's OMA 0.46-0.74, optimised OMA
   0.68-0.91, adaptive NOMA 0.75-0.96 (0.71-0.90 with imperfect SIC). These are a reviewer's quick check, not results; the real
   runs are in Track 1. The agreed designs are D-39, D-40 and D-41; both tracks now run in parallel.
+- **Step 5 done (Chapter 7.10):** circling instead of hovering serves 26% more people per battery.
+- **Step 3 done (Chapter 7.11, D-51): there is no room for anticipation in today's moving-crowd scenarios** (a pilot that knows
+  the future gains +0.002 over B6). Options for the redesign before G5, to be chosen by the owner:
+  1. **Tight battery** (12-13 Wh): the decisions become *when to move, when to circle, when to save energy*, which have
+     long-term consequences (B7 already gains +0.08 to +0.12 there). The clairvoyant test then needs the battery in its plan.
+  2. **Competing crowds:** crowds that drift apart so one drone cannot serve them all and must choose and time its moves.
+  3. **Sudden, fast events** (larger, faster surges; a crowd appearing far away) or a slower drone.
+  4. **Narrower footprints** (lower power or more buildings), so position matters more.
 

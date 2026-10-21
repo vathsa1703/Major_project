@@ -434,3 +434,12 @@ inside G5 (D-49), approved a new roadmap and asked for a dashboard to show the w
 the project was failing, I listed what is proven (H1, H3, B7, the simulator, the dataset) against the one open problem (the AI
 does not hold the best spot), and made two GIFs of scenario 105 showing that problem (AI 0.66, B3 0.78).
 
+### 51. The prize for anticipation is almost zero (step 3)
+The step 3 agent built a clairvoyant pilot that knows where every person will be for the whole mission and plans the best
+possible flight, replayed in the real game (about 3 hours of computing on one process). Against B6 it gains only +0.002
+coverage on average and at most +0.003 for any crowd type (Chapter 7.11), far below the 0.02 pass mark fixed beforehand, so the
+rule fired (D-51): today's moving crowds leave no room for an AI that anticipates, because the drone (15 m/s, re-planning every
+10 s) is much faster than the crowds. I checked the numbers from the raw data and re-ran one scenario myself. This is a useful
+negative result found *before* two weeks of training. The scenarios must be redesigned before G5; the owner chooses how.
+The owner also merged PRs #13, #14 and #15 (tracks 1 and 2, step 5, the dashboard).
+

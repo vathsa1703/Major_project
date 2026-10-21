@@ -56,6 +56,7 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-48 | 10-21 | Settings for G5 onwards: access `noma_opt`, sic_eps 0.05, rescue_first on, acceleration limit 4 m/s^2 on | Owner |
 | D-49 | 10-21 | Still-crowd fixes (G4b: move-by steering, longer training, bigger net; fix C) go to the backlog; the move-by fix is tested inside G5 | Owner |
 | D-50 | 10-21 | New roadmap (stages 0-5) replaces the 10-19 order; dashboard built now as a parallel showcase track (Streamlit approved) | Owner |
+| D-51 | 10-21 | Clairvoyant test: no room for anticipation in today's moving-crowd scenarios (+0.002 < 0.02); redesign scenarios before G5 | Pre-registered rule |
 
 ---
 
@@ -318,4 +319,10 @@ The roadmap of 10-19 is replaced by stages 0-5 (`docs/roadmap.md`): 0 housekeepi
 events; 3 realism and safety layer; 4 final evaluation and write-up (core); 5 a simulated drone that really flies (last).
 The owner asked for a dashboard now, to show the work visually; it is a parallel track (Streamlit, approved) built on the same
 engine, so its numbers equal the experiments'.
+
+### D-51 No room for anticipation in today's scenarios
+Pre-registered rule (step 3 plan): if a pilot that knows the crowd's whole future beats B6 by less than 0.02 coverage for every
+crowd type, the moving-crowd scenarios leave no room for an anticipating AI, and they are redesigned before G5. Result: +0.001 to
++0.003 for every type (Chapter 7.11). The rule fired. G5 does not start on today's scenarios; the redesign direction is the
+owner's choice (options in Chapter 14.8 progress note).
 
