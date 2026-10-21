@@ -411,3 +411,15 @@ the power formula independently (exact to 1e-15 on 2,000 random pairs).
 Building the PDF from a clean copy of the repository showed 22 pictures instead of 26: the 6 GIFs of the book had never been
 committed, because `.gitignore` ignores every `*.gif` (a rule from the start, meant for viewer output). They existed only on the
 owner's laptop. Fixed with an exception for `docs/book/figures/gifs/`; the 6 GIFs (4.7 MB) are now in the repository.
+
+### 49. The owner sets the G4 pass mark, approves the physics fixes, and Track 2 ends
+While the AI trained, two AI runs scored the same 0.573 but one "passed" the old test and one "failed", because 20 scenarios
+give wide error bars. I explained the problem (first too technically; the owner asked again and an exam analogy worked) and the
+owner chose a fixed pass mark **before** the last result: 3-run average at least 0.58 (D-43). A reviewer then found that the game
+lets a drone save 25% battery by shaking back and forth on the spot (no acceleration limit); I reproduced it (0 m moved, 131 J/s
+instead of 174). The owner approved an acceleration limit, run-to-empty as the circling pilot's main measure and a turning-energy
+term (D-44 to D-46). Steps 3 and 5 were built in parallel while the AI trained.
+Track 2 result (Chapter 8.8): best AI 0.576 over 3 runs, 0.004 short of the pass mark and clearly behind B2 on a second unseen set;
+the privileged critic did not help. **G4 not met; stopping rule reached; on to moving crowds.** Merging Track 1 into Track 2 had
+one conflict (both added arguments to `UAVEnv.__init__`), resolved by keeping both; 251 tests pass.
+

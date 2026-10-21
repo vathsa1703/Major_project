@@ -32,7 +32,7 @@ uav_dataset/
   access_benchmark.py    the four access schemes at each scheme's best spot (one snapshot)
   altitude_by_class.py   Gate G2 diagnostic (best altitude per user class)
   mobility_check.py      H1 check (fixed drone vs best position over time)
-  test_*.py              227 tests
+  test_*.py              251 tests
 ```
 Not committed: `uav_dataset/data/`, `data_v1/`, `results/`, logs, Excel files, `docs/papers/` (local copies of papers).
 
@@ -56,7 +56,7 @@ deletion; admin enforcement off.
 Lint rules: ruff E, F, W, I, B with line length 120; E741, E702 and E731 ignored (single-letter names, `a; b` and short lambdas
 are normal in the math code).
 
-## 9.4 Tests (227 on 2026-10-21)
+## 9.4 Tests (251 on 2026-10-21)
 | File | Tests | Covers |
 |---|---|---|
 | `test_noma.py` | 9 | gain vs distance, rate vs power, power split, SIC check (forced failure), pairing, scenario variety, class mix |
@@ -66,10 +66,10 @@ are normal in the math code).
 | `test_pipeline.py` | 9 | splits never overlap, config consistency, user ranges, sweep shape and values, NOMA vs OMA at high power, Jain index |
 | `test_parameters.py` | 7 | values derived from Zeng's formulas, propulsion equation, FSPL reference, LoS probability, assumptions document coverage |
 | `test_profiles.py` | 9 | profiles change only what they name, never leak, environment runs under each |
-| `test_baselines.py` | 53 | statistics, helpers, every pilot valid and deterministic, B0-B6 behaviours, information-ladder pilots ignore what their rung may not see, runner accounting, report |
+| `test_baselines.py` | 62 | statistics, helpers, every pilot valid and deterministic, B0-B6 behaviours, information-ladder pilots ignore what their rung may not see, runner accounting, report |
 | `test_compare_run.py` | 3 | same scenario for every pilot, dead drone counts zero, determinism |
-| `test_rl.py` | 36 | control modes, waypoint flight, decision hold, scenario pool, static crowd, reward parts, observation groups, model settings, viewer pilots, PPO smoke |
-| `test_rl_net.py` | 5 | CNN output size, reproducibility, position sensitivity, PPO with CNN, noise annealing |
+| `test_rl.py` | 45 | control modes, waypoint flight, decision hold, scenario pool, static crowd, reward parts, observation groups, model settings, viewer pilots, PPO smoke, Dict observation, uncapped maps, crowd size, history, fresh seed pool, privileged state only when asked, the AI never asks for it when flying |
+| `test_rl_net.py` | 11 | CNN output size, reproducibility, position sensitivity, PPO with CNN, noise annealing, Dict extractor, the actor's output unchanged when only privileged data changes (before and after training), SAC save/load |
 | `test_access.py` | 45 | adaptive NOMA and optimised OMA: closed form, imperfect SIC, brute force on small crowds, power budget, monotone in power, odd crowds, rescue first, old schemes unchanged |
 | `test_noma_access.py` | 8 | NOMA default, both schemes reported, OMA scoring, evaluate uses the tested scheme, NOMA total speed, H3 table and runner, NOMA picture |
 

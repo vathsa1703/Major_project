@@ -204,3 +204,61 @@ Mean coverage_full by mobility model (scenario counts: static 20):
 | mobility | B2 | B3 | PPO | Random |
 |---|---|---|---|---|
 | static | 0.610 | 0.659 | 0.549 | 0.430 |
+
+## 8.8 Track 2: a better learner, and the G4 verdict (2026-10-21)
+**What changed for the AI (D-40), all raw measurements a real drone has:**
+- an **uncapped** crowd map (square root of the share of people per cell, so no cell ever reads "full"), and the same for the
+  rescue map;
+- the **number of connected users** (log scale);
+- its **own history**: where it was at its last 4 decisions and how many people it served there;
+- **fresh training scenarios** (seeds 10,000-19,999, never validation or test) instead of the same 100 maps;
+- a planning horizon (gamma) of 0.95, matched to 30 decisions per game.
+Three learners: **E0** PPO with these inputs; **E2** SAC (a learner that scores actions directly); **E3** SAC with a
+**training-only privileged critic** (owner's decision D-38): during training, the part that judges moves saw the true 20 x 20
+crowd density, rescue users, buildings, people's needs and crowd size; the flying part never did. Three tests guard this: the
+actor's network has no input for that data, its output is bit-identical when only the privileged data changes (before and after
+training), and when flying the AI never asks the game for it.
+
+**The pass mark (D-43, set by the owner before E3's result): G4 passes if the 3-run average on the 20 validation scenarios is
+at least B2 - 0.03 = 0.580, and the AI clearly beats random.** A version earns 2 extra runs only if its first run reaches 0.570.
+
+**Results on the 20 validation scenarios** (bars: B2 0.610, B3obs 0.605, B3 0.659, Random 0.430):
+
+| Version | Run 1 | Run 2 | Run 3 | **3-run average** | vs pass mark 0.580 |
+|---|---|---|---|---|---|
+| E0 PPO, new inputs | 0.573 | 0.574 | 0.581 | **0.576 +/- 0.011** | short by 0.004 |
+| E2 SAC | 0.567 | (no extra runs: below 0.570) | | | |
+| E3 SAC, privileged critic | 0.571 | 0.572 | 0.551 | **0.565 +/- 0.029** | short by 0.015 |
+| old best E5a (8.3) | 0.555 | | | | |
+
+E0 (all 3 runs averaged per scenario) vs B2 -0.034 +/- 0.038, vs B3obs -0.029*, vs B3 -0.083*, vs Random +0.146*.
+
+**A second set of scenarios the AI never saw** (seeds 0-19; bars: B2 0.568, B3obs 0.561, B3 0.603, Random 0.320): E0 0.524 /
+0.515 / 0.517 (average 0.519, vs B2 -0.050*), E2 0.534 (vs B2 -0.034, not significant), E3 0.502 / 0.521 / 0.478 (average
+0.501, vs B2 -0.068*). Here the AI is clearly behind B2, so the gap is real and not an artefact of the 20 validation scenarios.
+
+**Verdict: Gate G4 is NOT met** under the owner's rule. The best version (E0) is 0.004 short on validation and about 0.05 behind
+B2 on the second set. By the pre-agreed stopping rule we stop tuning for the still crowd.
+
+**What we learned.**
+1. **Better inputs and fresh scenarios helped, steadily:** 0.555 to 0.576, with very little spread between runs (0.573-0.581).
+2. **The privileged critic did not help** (E3 0.565, more spread, worst on the second set), although in theory it is the
+   version where a privileged critic should matter most. SAC was not better than PPO and costs 3-4 times more computer time.
+3. **The AI still does not stay at the best spot.** On seed 105 it reaches B3's spot at about 30 s (0.80 coverage), then flies
+   on to the upper crowd behind a building and settles at 0.66, while B3 and B3obs stay and score 0.78
+   ([10_e0_vs_b3_seed105.png](figures/10_e0_vs_b3_seed105.png)). Over the 20 validation scenarios its final position is 264-291 m
+   from B3's. It no longer simply heads for the densest cell (it ends there in 0-10% of games, B3 in 30%), but it does not find
+   the spot between crowds either.
+4. **The gap is learning, not information:** a plain search with exactly the same inputs (B3obsUN, uncapped maps plus the true
+   crowd size) scores 0.606; with or without the crowd size or the cap, the search barely changes (0.605-0.613). The AI has the
+   information; it does not turn it into the best position.
+
+**What comes next (owner's decision 4, D-38):** move to moving crowds (G5), where a pilot that only reacts to the present is
+always a step late. Step 3's clairvoyant pilot measures first how much there is to win there. E0 is the starting agent.
+
+**Technical notes.** PPO: 150k decisions per run, 41-79 min. SAC: 100k decisions, 80-111 min, replay buffer 50k (RAM
+limited), one gradient step per 4 decisions. CIs over scenarios use z = 1.96 (a t value would widen them by about 7%; no
+verdict changes). Reproduce: `python rl_train.py --algo PPO --obs_mode dict --gamma 0.95 --train_seeds 10000-19999 ...` (the
+exact settings are saved in each model's `config.json`); `python rl_eval.py --model <zip> --policies Random,B2,B3,B3obs,B3obsUN
+--split val`.
+

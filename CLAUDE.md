@@ -86,6 +86,10 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
   `access.rescue_first`). Adaptive NOMA beats equally optimised OMA by +0.03-0.05 coverage for every pilot (hard B3 0.849
   vs 0.808; lowpower 0.983 vs 0.945), but both opt schemes give ~55-65% less total speed than fixed ones. Owner picks the
   G5 default (D-42; recommendation noma_opt, eps 0.05, rescue_first).
+  G4 CLOSED, NOT MET (D-43 pass mark 3-run val20 mean >= 0.580; D-47): Track 2 best E0 PPO (Dict obs: uncapped maps,
+  crowd_n, history; fresh seeds 10000-19999; gamma 0.95) 0.576 over 3 runs; SAC 0.567; SAC + privileged critic 0.565.
+  Book 8.8. Next: G5 (moving crowds) with E0 as the starting agent, after step 3 (oracle headroom) and step 5 (accel
+  limit + loiter B7; owner approved D-44..46, a_max off until G4 closes -> now may be switched on for G5).
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.

@@ -48,6 +48,11 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-40 | 10-21 | Better-learner design after a second review: uncapped map, crowd size, own measurement history, fresh seeds, SAC with a training-only privileged critic | Claude + reviewer |
 | D-41 | 10-21 | The physics default stays `access: noma` until G4 is closed, so the bars the AI is judged against do not move | Claude + reviewer |
 | D-42 | 10-21 | Adaptive NOMA added as `noma_opt` (with `oma_opt` as its fair reference); default unchanged; G5 default is the owner's call | Claude |
+| D-43 | 10-21 | G4 pass mark: 3-run average on val20 >= B2 - 0.03 (0.580) and clearly above random; extra runs only from 0.570 | Owner (set before the result) |
+| D-44 | 10-21 | Acceleration limit 4 m/s^2 (sensitivity 2-8), off until G4 closes; closes the battery-saving 'shaking' exploit | Owner |
+| D-45 | 10-21 | Circling pilot B7 is judged by total service until the battery is empty | Owner |
+| D-46 | 10-21 | Turning/acceleration energy term added, labelled as our extension of the Zeng model | Owner |
+| D-47 | 10-21 | G4 closed as NOT met (best 0.576 < 0.580); stop still-crowd tuning; E0 is the starting agent for G5 | Rule D-43 + D-26 |
 
 ---
 
@@ -273,4 +278,24 @@ judged against. Track 2 trains and evaluates with today's NOMA; the project defa
 `access:` (engineering assumptions). The default stays `noma` (D-41), so every earlier number is unchanged and reproducible.
 Before G5 the owner chooses the project default once. My recommendation: `noma_opt` with `sic_eps: 0.05` (realistic, still
 beats optimised OMA) and `rescue_first: true` (fits a disaster mission), reported next to `oma_opt` so H3 stays a fair test.
+
+### D-43 The G4 pass mark
+The old test ("not significantly worse than B2") flipped on luck: two runs with the same 0.573 got opposite verdicts, because
+20 scenarios give wide error bars. The owner chose, before E3's result was known: **G4 passes if the average over 3 training
+runs on the 20 validation scenarios is at least B2 - 0.03 = 0.580 and the AI is clearly better than random.** Only a version
+whose first run reaches 0.570 gets the 2 extra runs.
+
+### D-44 to D-46 Physics fixes approved before the circling experiment
+A reviewer found, and I reproduced, that the drone can change velocity instantly, so alternating +10 and -10 m/s every second
+keeps it in place at the cheaper forward-flight power (131 J/s instead of 174 J/s hover). No earlier result used this (no pilot
+shakes, the AI's reward ignores energy), but any energy result or energy reward could be gamed. The owner approved: an
+acceleration limit (4 m/s^2, engineering assumption, sensitivity 2/4/8, **off by default until G4 closes** so earlier results
+stay bit-exact); total service until the battery is empty as the circling pilot's main measure; and a load-factor energy term
+for turning and braking, labelled as our extension of Zeng-Xu-Zhang (whose rotary-wing model covers steady straight flight).
+
+### D-47 G4 closed as not met
+Best 3-run average 0.576 (E0) < 0.580; E3 0.565; E2 below the extra-run threshold. On a second unseen set the AI is clearly
+behind B2 (-0.050). By D-43 and the stopping rule (D-26) the still-crowd tuning stops; this is reported as a negative result
+with its causes (Chapter 8.7-8.8). Per the owner's decision 4 (D-38) the project moves to moving crowds (G5) with E0 as the
+starting agent.
 
