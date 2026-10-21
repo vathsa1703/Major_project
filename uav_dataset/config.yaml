@@ -95,6 +95,11 @@ energy:
   P_circuit_w: 5.0              # ENGINEERING ASSUMPTION: on-board electronics
   pa_efficiency: 0.4            # ENGINEERING ASSUMPTION: power-amplifier efficiency, comm power = P_tx / this
   battery_wh: 10.0              # small on purpose: ~3.5 min of hover, so the battery binds in a 300 s episode
+  # Accelerating / turning flight (OUR EXTENSION, outside Zeng's steady straight-flight model). Used ONLY when
+  # uav.a_max_mps2 is set: load factor kappa = sqrt(1 + (a_h/g)^2) from the realised horizontal acceleration a_h,
+  # induced power Pi * kappa^1.5 and v0 * sqrt(kappa) (momentum theory with thrust kappa * W).
+  accel_power: true             # false = acceleration limit without the energy term (diagnostic only)
+  g_mps2: 9.81                  # STANDARD gravity
 
 # UAV limits (spec values; engineering assumptions)
 uav:
@@ -104,6 +109,12 @@ uav:
   h_max_m: 300.0                # the sweep goes above this for diagnostics only
   start_h_m: 150.0
   p_max_dbm: 30.0
+  # Acceleration limit (plan step 5). null = OFF = the old model (velocity jumps to the command; results bit-exact).
+  # When set, the velocity changes by at most a_max * dt per step (vector norm), vertically by az_max * dt, and the
+  # accel-energy term above switches on. Value when enabled: 4 (ENGINEERING ASSUMPTION; sensitivity {2, 4, 8}).
+  a_max_mps2: null              # horizontal acceleration limit, m/s^2
+  az_max_mps2: 3.0              # vertical acceleration limit, m/s^2, used only when a_max_mps2 is set
+                                # (ENGINEERING ASSUMPTION; sensitivity {2, 4})
 
 # Gymnasium env (Phase 5)
 env:
@@ -127,6 +138,7 @@ baselines:
   altitude_levels_m: [50, 100, 150, 200, 300]   # B6: altitudes tried at every grid position
   pso: {particles: 12, iters: 10, inertia: 0.7, c1: 1.5, c2: 1.5}
   energy_aware_margin: 1.0      # B5 moves only if (coverage gain x K) > margin x extra energy cost (in reward units)
+  loiter_radius_m: 50           # B7: radius of the loiter circle around B6's target (ENGINEERING ASSUMPTION; {50, 100})
   # B3obs / B3obsU / B3obsUO (information ladder): B3's search, but scored on a pseudo-crowd rebuilt from the maps.
   obs_pseudo_users: 500         # ENGINEERING ASSUMPTION: crowd size they assume (mean of n_users_choices; must be even)
 

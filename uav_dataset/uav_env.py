@@ -8,7 +8,9 @@ obstacles, optional fading) and NOMA rates are recomputed, and the battery drain
     obs, reward, terminated, truncated, info = env.step(action)
 
 Action (continuous, in [-1, 1]): [vx, vy, vz, power]. vx/vy scale to v_max_mps, vz to vz_max_mps,
-power maps linearly to 0..P_max (never fully off).
+power maps linearly to 0..P_max (never fully off). The velocity is the command itself, unless uav.a_max_mps2 is set:
+then it moves toward the command by at most a_max * dt per step, and the energy adds the load-factor term
+(make_dataset.load_factor; our extension).
 Observation (float32, all in [-1, 1]): see _obs(). Size = 11 + 2 * grid * grid.
 Reward: v1 = coverage;  v2 = coverage - lambda_energy * (energy_step / hover_energy_step).
 Battery empty -> terminated, with reward -= terminal_penalty * (share of users left uncovered).
@@ -139,10 +141,27 @@ class UAVEnv(gym.Env):
             vh *= self.uav["v_max_mps"] / norm
         vz = a[2] * self.uav["vz_max_mps"]
         p_w = max(1e-3, self.p_max_w * (a[3] + 1) / 2)
+        a_max = self.uav.get("a_max_mps2")
+        v_prev = (self.vx, self.vy)
+        if a_max is not None:
+            # acceleration limit: the commanded velocity is only approached, by at most a_max * dt (vector norm)
+            # horizontally and az_max * dt vertically. The result is a convex mix of the old and the commanded
+            # velocity, so speed limits still hold.
+            dv = vh - np.array(v_prev)
+            n = np.linalg.norm(dv)
+            if n > a_max * self.dt:
+                dv *= a_max * self.dt / n
+            vh = np.array(v_prev) + dv
+            az = self.uav["az_max_mps2"] * self.dt
+            vz = self.vz + float(np.clip(vz - self.vz, -az, az))
 
         nx, ny = np.clip(self.x + vh[0] * self.dt, 0, self.L), np.clip(self.y + vh[1] * self.dt, 0, self.L)
         nh = np.clip(self.h + vz * self.dt, self.uav["h_min_m"], self.uav["h_max_m"])
+        # the stored velocity is the REALISED one: at the map edge or an altitude limit the drone stops on that axis
+        # (a hard geofence stop; the only case where the realised change can exceed a_max * dt)
         self.vx, self.vy, self.vz = (nx - self.x) / self.dt, (ny - self.y) / self.dt, (nh - self.h) / self.dt
+        accel = float(np.hypot(self.vx - v_prev[0], self.vy - v_prev[1])) / self.dt    # realised horizontal accel.
+        use_accel_energy = a_max is not None and CFG["energy"]["accel_power"]
         self.x, self.y, self.h = float(nx), float(ny), float(nh)
         self.t += 1
 
@@ -172,7 +191,8 @@ class UAVEnv(gym.Env):
             throughput=float(min(1.0, rate.sum() / (2.0 * self.min_rate.sum()))),
             fairness=md.jain(rate))
 
-        e_step = float(md.energy_step_j(np.hypot(self.vx, self.vy), self.vz, p_w))
+        e_step = float(md.energy_step_j(np.hypot(self.vx, self.vy), self.vz, p_w,
+                                        accel if use_accel_energy else None))
         self.energy_left_j = max(0.0, self.energy_left_j - e_step)
         self.energy_used_j += e_step
         self.served_user_s += float(served.sum()) * self.dt
@@ -186,7 +206,8 @@ class UAVEnv(gym.Env):
         truncated = (not terminated) and self.t >= self.T
         info = self._info(served, rate=rate, energy_step_j=e_step, p_tx_w=p_w)
         # each reward part is reported separately, so reward hacking can be spotted
-        info.update(reward_coverage=coverage, reward_energy=energy_term, reward_terminal=terminal_term)
+        info.update(reward_coverage=coverage, reward_energy=energy_term, reward_terminal=terminal_term,
+                    accel_mps2=accel)
         info.update(both, access=self.access)
         return self._obs(), float(reward), bool(terminated), bool(truncated), info
 

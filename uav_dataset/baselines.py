@@ -1,4 +1,5 @@
-"""Baseline controllers B0-B5, plus B6 (B3 with altitude search).
+"""Baseline controllers B0-B5, plus B6 (B3 with altitude search) and B7 (B6's targets, but circling at the
+minimum-power speed instead of hovering; plan step 5).
 Each one drives the SAME UAVEnv through env.step(), so comparisons are fair.
 
     policy = make_policy("B2")
@@ -19,14 +20,41 @@ BCFG = md.CFG["baselines"]
 
 
 # ---------------------------------------------------------------- shared helpers
-def go_to(env, tx, ty, th, power_frac):
-    """Action that flies toward (tx, ty, th) as fast as allowed and sets the transmit power."""
+def brake_speed(dist, a, dt):
+    """Fastest speed (m/s) from which the drone can still stop within `dist` metres when it may change its speed
+    by only a * dt per step. Discrete braking from k * a * dt moves a * dt^2 * k(k+1)/2 before it stops, so
+    k = (sqrt(1 + 8 dist / (a dt^2)) - 1) / 2. Always <= sqrt(2 a dist), the continuous braking curve."""
+    k = (np.sqrt(1.0 + 8.0 * dist / (a * dt * dt)) - 1.0) / 2.0
+    return a * dt * k
+
+
+def vertical_action(env, th):
+    """Normalised climb command toward altitude th (as fast as allowed; brakes when uav.a_max_mps2 is set)."""
     u = env.uav
-    d = np.array([tx - env.x, ty - env.y]) / (u["v_max_mps"] * env.dt)
-    n = np.linalg.norm(d)
-    if n > 1.0:
-        d = d / n
-    az = np.clip((th - env.h) / (u["vz_max_mps"] * env.dt), -1.0, 1.0)
+    if u.get("a_max_mps2") is None:
+        return np.clip((th - env.h) / (u["vz_max_mps"] * env.dt), -1.0, 1.0)
+    dh = th - env.h
+    s = min(u["vz_max_mps"], abs(dh) / env.dt, brake_speed(abs(dh), u["az_max_mps2"], env.dt))
+    return float(np.sign(dh) * s / u["vz_max_mps"])
+
+
+def go_to(env, tx, ty, th, power_frac):
+    """Action that flies toward (tx, ty, th) as fast as allowed and sets the transmit power.
+    With the acceleration limit on (uav.a_max_mps2 set) it brakes in time: commanded speed
+    <= brake_speed(distance) <= sqrt(2 a_max distance), so it does not overshoot the target."""
+    u = env.uav
+    a_max = u.get("a_max_mps2")
+    if a_max is None:                                   # old model: unchanged, bit-exact
+        d = np.array([tx - env.x, ty - env.y]) / (u["v_max_mps"] * env.dt)
+        n = np.linalg.norm(d)
+        if n > 1.0:
+            d = d / n
+    else:
+        delta = np.array([tx - env.x, ty - env.y])
+        dist = float(np.linalg.norm(delta))
+        s = min(u["v_max_mps"], dist / env.dt, brake_speed(dist, a_max, env.dt))
+        d = delta / dist * s / u["v_max_mps"] if dist > 0 else np.zeros(2)
+    az = vertical_action(env, th)
     return np.array([d[0], d[1], az, 2.0 * power_frac - 1.0])
 
 
@@ -280,17 +308,72 @@ class B6GridAltitude(Policy):
     Power stays at full, like B3."""
     name = "B6"
 
+    def here(self, env):
+        """The 'stay' candidate, also the reference point for ties: B6 uses where the drone is now."""
+        return env.x, env.y, env.h
+
     def plan(self, env):
         X, Y = _grid(env)
+        hx, hy, hh = self.here(env)
         levels = np.array(BCFG["altitude_levels_m"], dtype=float)
         CX, CH = np.repeat(X, len(levels)), np.tile(levels, len(X))
         CY = np.repeat(Y, len(levels))
-        CX, CY, CH = np.append(CX, env.x), np.append(CY, env.y), np.append(CH, env.h)
+        CX, CY, CH = np.append(CX, hx), np.append(CY, hy), np.append(CH, hh)
         cov = env.evaluate(CX, CY, CH, env.p_max_w * self.power)
         best = np.flatnonzero(cov >= cov.max() - 1e-12)
-        d = np.sqrt((CX[best] - env.x) ** 2 + (CY[best] - env.y) ** 2 + (CH[best] - env.h) ** 2)
+        d = np.sqrt((CX[best] - hx) ** 2 + (CY[best] - hy) ** 2 + (CH[best] - hh) ** 2)
         j = best[np.argmin(d)]                                           # ties: the closest one
         self.target = (CX[j], CY[j], CH[j])
+
+
+class B7Loiter(B6GridAltitude):
+    """B7 (loiter): B6's target choice (grid x altitude levels, every K steps), but instead of hovering over the
+    target it circles it: transit at v_max to the nearest point of the circle (braking in time), then fly a circle
+    of radius loiter_radius_m at the constant minimum-power speed v_loiter, at the chosen altitude.
+    Why: in the rotary-wing model flying at about 10 m/s costs ~25% less power than hovering, so circling may serve
+    users for longer on one battery, at the price of being up to r away from the best spot.
+    v_loiter comes from the energy model (make_dataset.min_power_speed): Zeng's v* when the accel-energy term is off;
+    with it on, the speed that minimises P(v, kappa(v^2/r)) on this circle, capped at sqrt(a_max * r).
+    The circle centre is the target clamped to [r, L - r], so the circle stays inside the map. The 'stay' candidate in
+    planning is the current target (the drone itself is on the circle, up to r away from it).
+    Discrete flight: every step the drone aims at the circle point one chord ahead (counter-clockwise), with the
+    chord angle 2 asin(v dt / 2r), so on the circle each step moves exactly v_loiter * dt and changes the velocity by
+    v^2 dt / r (the centripetal acceleration)."""
+    name = "B7"
+
+    def reset(self, env):
+        super().reset(env)
+        self.r = float(BCFG["loiter_radius_m"])
+        a_max = env.uav.get("a_max_mps2")
+        turn_energy = a_max is not None and md.CFG["energy"]["accel_power"]
+        self.v_loiter = md.min_power_speed(env.uav["v_max_mps"], self.r if turn_energy else None, a_max)
+        self.dtheta = 2.0 * np.arcsin(min(1.0, self.v_loiter * env.dt / (2.0 * self.r)))
+
+    def here(self, env):
+        return self.target
+
+    def centre(self, env):
+        tx, ty, _ = self.target
+        lo, hi = self.r, env.L - self.r
+        return float(np.clip(tx, lo, hi)), float(np.clip(ty, lo, hi))
+
+    def act(self, env):
+        if self.replan_due(env):
+            self.plan(env)
+        cx, cy = self.centre(env)
+        th = self.target[2]
+        rx, ry = env.x - cx, env.y - cy
+        rho = float(np.hypot(rx, ry))
+        if rho > self.r + self.v_loiter * env.dt:                       # transit: to the nearest circle point
+            return go_to(env, cx + self.r * rx / rho, cy + self.r * ry / rho, th, self.power)
+        theta = float(np.arctan2(ry, rx)) if rho > 0 else 0.0
+        px, py = cx + self.r * np.cos(theta + self.dtheta), cy + self.r * np.sin(theta + self.dtheta)
+        v = np.array([px - env.x, py - env.y]) / env.dt
+        n = float(np.linalg.norm(v))
+        if n > env.uav["v_max_mps"]:
+            v *= env.uav["v_max_mps"] / n
+        vn = v / env.uav["v_max_mps"]
+        return np.array([vn[0], vn[1], vertical_action(env, th), 2.0 * self.power - 1.0])
 
 
 class B4PSO(Policy):
@@ -357,7 +440,8 @@ class B5EnergyAware(Policy):
 
 
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
-            "B6": B6GridAltitude, "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles}
+            "B6": B6GridAltitude, "B7": B7Loiter,
+            "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles}
 
 
 def make_policy(name):
