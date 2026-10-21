@@ -1,0 +1,2 @@
+# Only needed to rebuild the project book PDF (docs/book/build_pdf.py)
+reportlab

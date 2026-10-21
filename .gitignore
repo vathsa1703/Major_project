@@ -32,3 +32,6 @@ uav_dataset/results/
 
 # papers (copyright): keep local
 docs/papers/
+
+# PDF build scratch (GIF stills)
+docs/book/build/

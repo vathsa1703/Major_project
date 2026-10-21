@@ -101,6 +101,7 @@ uav:
 # Gymnasium env (Phase 5)
 env:
   grid: 10                      # NxN user-density heatmap
+  access: noma                  # noma | oma: how users share the radio (OMA = FDMA, same total bandwidth and power)
   reward: v2                    # v1 = coverage;  v2 = coverage - lambda_E * (energy_step / hover_energy_step)
   lambda_energy: 0.05           # ENGINEERING ASSUMPTION
   terminal_penalty: 1.0         # battery empty: reward -= penalty * share of users left uncovered
@@ -134,6 +135,14 @@ profiles:
     mobility: {choices: [static]}
     energy: {battery_wh: 16}
     baselines: {grid_n: 14}
+  rl_static_g20:                 # same scenarios as rl_static, but the agent's map is 20 x 20 instead of 10 x 10
+    area_m: 2000
+    uav: {p_max_dbm: 20}
+    obstacles: {n_range: [3, 8], size_range_m: [60, 200]}
+    mobility: {choices: [static]}
+    energy: {battery_wh: 16}
+    baselines: {grid_n: 14}
+    env: {grid: 20}
   hard:                          # everything at once, plus dynamic-only mobility models and a battery that can last
     area_m: 2000
     uav: {p_max_dbm: 20}
@@ -156,11 +165,14 @@ rl:
   batch_size: 256
   n_epochs: 10
   learning_rate: 0.0003
-  gamma: 0.995                   # long horizon (300 steps)
+  gamma: 0.995                   # kept from the 1-step setup; with hold_steps 10 a game is only 30 decisions (book 14.5)
   gae_lambda: 0.95
   clip_range: 0.2
   ent_coef: 0.0
   net_arch: [64, 64]
+  policy: mlp                    # mlp = plain network on the observation | cnn = reads the two maps as a picture
+  obs_groups: [pos, vel, battery, time, prev, heat_all, heat_rescue]   # what the agent sees (all = 211 numbers)
+  std_end: null                  # if a number, the exploration noise shrinks linearly from exp(log_std_init) to it (e.g. 0.05)
   log_std_init: -1.0             # start with action noise of about 0.37 (SB3 default 0 = 1.0, too noisy here)
   norm_reward: true              # scale rewards (returns are ~150): standard for PPO value learning
   val_eval_every_steps: 20000    # (decisions) print a deterministic score on the first val scenarios during training

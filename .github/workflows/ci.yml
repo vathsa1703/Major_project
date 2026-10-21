@@ -42,4 +42,4 @@ jobs:
           cache: pip
       - run: pip install -r requirements-rl.txt pytest --extra-index-url https://download.pytorch.org/whl/cpu
       - name: RL tests (includes a short PPO training run)
-        run: pytest -q uav_dataset/test_rl.py
+        run: pytest -q uav_dataset/test_rl.py uav_dataset/test_rl_net.py

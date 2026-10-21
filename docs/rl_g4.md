@@ -1,3 +1,5 @@
+> **Note:** this summary is superseded by the project book, [Chapter 8](book/08-ai-experiments.md), which is kept up to date.
+
 # Gate G4 attempts: PPO on a still crowd
 
 **Task.** Profile `rl_static`: 2 x 2 km, 20 dBm, 3-8 obstacles, the crowd stands still, 16 Wh battery. The agent only controls

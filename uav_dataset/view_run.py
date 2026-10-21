@@ -21,7 +21,7 @@ from matplotlib.patches import Rectangle
 
 import make_dataset as md
 from baselines import POLICIES, make_policy
-from rl_utils import CONTROLS, RandomPolicy, RLPolicy
+from rl_utils import CONTROLS, RandomPolicy, RLPolicy, model_settings
 from uav_env import UAVEnv
 
 ALIASES = {"fixed": "B0", "follow": "B1"}
@@ -29,9 +29,12 @@ OVERRIDE_FLAGS = {"users": "n_users", "clusters": "n_clusters", "mobility": "mob
                   "radius": "cluster_radius_m", "scatter": "scatter_fraction"}
 
 
-def build_policy(name, model_path=None, controls="xy", hold=1):
+def build_policy(name, model_path=None, controls=None, hold=None):
     """A pilot by name: a baseline (B0..), 'random', or 'ppo' (a trained model)."""
     name = ALIASES.get(name, name)
+    saved = model_settings(model_path) if (name == "ppo" and model_path) else {}
+    controls = controls or saved.get("controls") or md.CFG["rl"]["controls"]
+    hold = hold or saved.get("hold_steps", 1)                 # old models were trained deciding every second
     if name in POLICIES:
         return make_policy(name)
     if name == "random":
@@ -40,7 +43,7 @@ def build_policy(name, model_path=None, controls="xy", hold=1):
         if not model_path:
             raise ValueError("--policy ppo needs --model path/to/model.zip")
         from stable_baselines3 import PPO
-        return RLPolicy(PPO.load(model_path, device="cpu"), controls, hold)
+        return RLPolicy(PPO.load(model_path, device="cpu"), controls, hold, saved.get("obs_groups"))
     raise ValueError(f"unknown policy {name!r}; choose from {sorted(POLICIES)} + random, ppo")
 
 
@@ -62,9 +65,9 @@ def main():
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--policy", default="B1")
     ap.add_argument("--model", default=None, help="model.zip for --policy ppo")
-    ap.add_argument("--controls", default=md.CFG["rl"]["controls"], choices=list(CONTROLS),
-                    help="which controls the model/random use (must match how the model was trained)")
-    ap.add_argument("--hold", type=int, default=md.CFG["rl"]["hold_steps"], help="seconds each decision is held (ppo)")
+    ap.add_argument("--controls", default=None, choices=list(CONTROLS),
+                    help="controls of the model/random (default: read from the model's saved settings)")
+    ap.add_argument("--hold", type=int, default=None, help="seconds each decision is held (default: from the model)")
     ap.add_argument("--profile", default="default", help="default, lowpower, bigarea, hard, rl_static")
     ap.add_argument("--battery_wh", type=float, default=None)
     ap.add_argument("--users", type=int)
