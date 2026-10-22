@@ -101,6 +101,7 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
   G5 settings inside; old results bit-exact). B8 battery rule = B7 (battery alone: no room). Future-knowing pilot minus
   best simple pilot: +0.025..+0.108, 7/9 designs pass 0.02 (d15_t180 borderline). NEXT: B6-forecast + fresh-seed
   confirmation (D-52 phase 3-4), then G5 training on passing designs. Plain-English summary: docs/summary/.
+  LIVE DASHBOARD (owner deployed 10-22): https://majorproject-xzmhcxpbheyudfxpvjap7f.streamlit.app/ (Streamlit Community Cloud, from main; showcase AI in uav_dataset/models/).
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.

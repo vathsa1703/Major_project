@@ -464,3 +464,10 @@ owner asked why we compare the AI with programmed pilots and with a future-knowi
 were wasted (no: they are the "where AI does not help" half of the answer H2 asks for), and whether a bigger map would help
 (not by itself: thinking ahead pays only when distance and fast change come together).
 
+### 54. The dashboard goes online, and a showcase page for the guide
+The owner asked to share the dashboard with the guide. Two routes, both done: (1) the dashboard was prepared for Streamlit
+Community Cloud (PR #18: a cloud install list, the best AI E0 committed as a 1.7 MB showcase model, an address setting that
+would have blocked the cloud removed) and the owner deployed it with his GitHub account: **https://majorproject-xzmhcxpbheyudfxpvjap7f.streamlit.app/** (it runs on a small free
+cloud machine, so slow pilots take up to a minute, and it sleeps after a few idle days); (2) a showcase page with the results,
+charts and animations was published as a private page the owner can share. PRs #17 (competing sites) and #18 were merged.
+
