@@ -120,8 +120,9 @@ def report(df, profile, battery_wh=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=None, help="use only the first N eval seeds")
-    ap.add_argument("--policies", default=",".join(p for p in POLICIES if not p.startswith("B3obs") and p != "B7"),
-                    help="default: B0-B6 (the information-ladder pilots B3obs* and the loiter pilot B7 only when "
+    ap.add_argument("--policies", default=",".join(p for p in POLICIES
+                                                   if not p.startswith("B3obs") and p != "B7" and p != "B8"),
+                    help="default: B0-B6 (the information-ladder pilots B3obs* and the loiter pilots B7, B8 only when "
                          "named)")
     ap.add_argument("--battery_wh", type=float, default=None, help="override energy.battery_wh")
     ap.add_argument("--tag", default=None, help="suffix for the output files (default: _<profile>)")
