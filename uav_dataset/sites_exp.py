@@ -90,7 +90,8 @@ def phase1_table():
             for s in VERIFY_SEEDS:
                 real = df[(df.policy == p) & (df.seed == s) & (df.battery_wh == b)]
                 if len(real):
-                    checks.append(bool(real.coverage_full.iloc[0] == vals[s][0]
+                    # equal up to summation order (np.sum of a list vs of an array slice: last-ulp differences)
+                    checks.append(bool(abs(real.coverage_full.iloc[0] - vals[s][0]) < 1e-12
                                        and bool(real.survived.iloc[0]) == vals[s][1]))
     for b in P1_BATTERIES:
         d = df[(df.policy == "B8") & (df.battery_wh == b)].set_index("seed").sort_index()
@@ -100,7 +101,7 @@ def phase1_table():
           f"(a_max {A_ON:g}),",
           "today's NOMA (env.access noma, as in book 7.10), 300 s; coverage_full (dead drone = 0), mean +/- 95% CI", "",
           f"B8 episodes found: {n8} per battery. B6/B7 by exact truncation of the 16 Wh step logs; truncation = real "
-          f"run on {sum(checks)}/{len(checks)} checks (seeds {VERIFY_SEEDS}, both batteries).", "",
+          f"run on {sum(checks)}/{len(checks)} checks (seeds {VERIFY_SEEDS}, both batteries; |diff| < 1e-12).", "",
           "| battery | B6 | B6 survived | B7 | B7 survived | B8 | B8 survived |", "|---|---|---|---|---|---|---|"]
     for b in P1_BATTERIES:
         cells = []
@@ -234,8 +235,8 @@ def headroom_table():
     L = ["## Phase 2: energy-free headroom on the competing-sites design grid (D-52)", "",
          "Per cell: mean coverage_full (replayed through env.step, 300 s, 16 Wh, a_max 4, noma_opt, sic_eps 0.05, "
          "rescue first). Best baseline = the best of B6, B7, B8 by the cell mean (pre-registered bar). dp - best: "
-         "paired over the cell's scenarios, mean +/- 95% CI. Teleport = tensor-level bound (best node in every 10 s segment, "
-         "travel ignored; not flyable). Transit = D / v_max. Pass mark (pre-registered): dp - best >= "
+         "paired over the cell's scenarios, mean +/- 95% CI. Teleport = tensor-level bound (best node in every 10 s "
+         "segment, travel ignored; not flyable). Transit = D / v_max. Pass mark (pre-registered): dp - best >= "
          f"{PASS_MARK:.2f}. Announced/unannounced: identical for dp and these baselines, so 9 cells, not 18.", "",
          "| cell | D km | tau s | transit s | n | B6 | B7 | B8 | best | dp | dp - best (95% CI) | p | teleport | "
          "teleport - best | dp - per-scenario max | dp - best before / after t0 | pass |",
