@@ -1,0 +1,62 @@
+{
+  "algo": "PPO",
+  "profile": "rl_static",
+  "hold_steps": 10,
+  "controls": "goto",
+  "reward": "v1",
+  "seed": 0,
+  "total_timesteps": 150000,
+  "n_envs": 4,
+  "n_steps": 256,
+  "batch_size": 256,
+  "n_epochs": 10,
+  "learning_rate": 0.0003,
+  "gamma": 0.95,
+  "gae_lambda": 0.95,
+  "clip_range": 0.2,
+  "ent_coef": 0.0,
+  "net_arch": [
+    64,
+    64
+  ],
+  "policy": "cnn",
+  "obs_groups": [
+    "pos",
+    "vel",
+    "battery",
+    "time",
+    "prev",
+    "crowd_n",
+    "history",
+    "heat_all_u",
+    "heat_rescue_u"
+  ],
+  "std_end": null,
+  "log_std_init": -1.0,
+  "norm_reward": true,
+  "val_eval_every_steps": 20000,
+  "val_eval_scenarios": 8,
+  "checkpoint_every_steps": 10000,
+  "out_dir": "results/rl",
+  "obs_mode": "dict",
+  "privileged": false,
+  "train_seed_range": [
+    10000,
+    19999
+  ],
+  "torch_threads": 2,
+  "sac": {
+    "learning_rate": 0.0003,
+    "buffer_size": 50000,
+    "learning_starts": 2000,
+    "batch_size": 256,
+    "tau": 0.005,
+    "train_freq": 1,
+    "gradient_steps": 1,
+    "ent_coef": "auto",
+    "net_arch": [
+      256,
+      256
+    ]
+  }
+}

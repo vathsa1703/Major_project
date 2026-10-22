@@ -19,6 +19,8 @@ Read `../CLAUDE.md` first for the project rules, hypotheses (H1-H4) and gates.
     pip install -r ../requirements-rl.txt && python rl_train.py   # train PPO (config: rl:), then rl_eval.py
     pip install -r ../requirements-dashboard.txt                # showcase + planning dashboard, then FROM THE REPO ROOT:
     streamlit run uav_dataset/dashboard.py                    # opens http://localhost:8501 (AI models: UAV_MODELS_DIR)
+    # Online: Streamlit Community Cloud, repo vathsa1703/Major_project, branch main, file uav_dataset/dashboard.py,
+    # Python 3.12; it installs uav_dataset/requirements.txt and flies the committed showcase AI in uav_dataset/models/.
 
 All settings are in `config.yaml`. Change values there, never in the code. One config per dataset version.
 `data/` is not in git: regenerate it. Splits are by seed and must never mix: train 0-99, val 100-119, test 120-139.

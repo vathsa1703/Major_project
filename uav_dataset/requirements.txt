@@ -1,0 +1,12 @@
+# Used by Streamlit Community Cloud to run the dashboard online (it reads the requirements file next to dashboard.py).
+# Local installs use the files in the repository root (requirements.txt, -dashboard, -rl).
+# CPU-only PyTorch keeps the download small enough for the free cloud machine.
+--extra-index-url https://download.pytorch.org/whl/cpu
+numpy
+pandas
+matplotlib
+pyyaml
+gymnasium
+streamlit
+stable-baselines3
+torch

@@ -1,7 +1,4 @@
-# Dashboard settings (streamlit run uav_dataset/dashboard.py, from the repo root).
-# Local only, and no usage statistics sent anywhere: the tool makes no network calls.
-[server]
-address = "localhost"
-
+# Dashboard settings (streamlit run uav_dataset/dashboard.py, from the repo root; also used by Streamlit Community Cloud).
+# No usage statistics are sent. For a strictly local run add: --server.address localhost
 [browser]
 gatherUsageStats = false
