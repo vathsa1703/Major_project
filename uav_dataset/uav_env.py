@@ -199,7 +199,14 @@ class UAVEnv(gym.Env):
         clairvoyant oracle (oracle.py)."""
         t = self.t if t is None else int(t)
         xy, min_rate, rescue = self.users_now(t)          # only the users active at t (all, without a mask)
-        ux, uy = xy.T
+        return self.evaluate_users(xy, min_rate, rescue, X, Y, H, p_w, t)
+
+    def evaluate_users(self, xy, min_rate, rescue, X, Y, H, p_w, t):
+        """env.evaluate for a GIVEN user set (positions xy (n, 2), min rates, rescue flags) instead of the users at
+        time index t: the same physics, access scheme, bandwidth and rng recipe (seeded by (scenario, t); used only by
+        the fixed schemes with random pairing). evaluate(..., t) == evaluate_users(*users_now(t), ..., t). Used by B6fc
+        to score a FORECAST user set (baselines.B6Forecast)."""
+        ux, uy = np.asarray(xy, dtype=float).T
         X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
         gains = md.channel_gain(ux, uy, X, Y, H, self.boxes)
         rng = np.random.default_rng([self.scenario_seed, t])
