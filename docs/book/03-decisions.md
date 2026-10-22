@@ -58,6 +58,7 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-50 | 10-21 | New roadmap (stages 0-5) replaces the 10-19 order; dashboard built now as a parallel showcase track (Streamlit approved) | Owner |
 | D-51 | 10-21 | Clairvoyant test: no room for anticipation in today's moving-crowd scenarios (+0.002 < 0.02); redesign scenarios before G5 | Pre-registered rule |
 | D-52 | 10-22 | Scenario redesign 'competing sites', PRE-REGISTERED before any run: design grid, baselines, pass mark, fresh-seed confirmation, negative control | Owner + reviewer |
+| D-53 | 10-22 | Phases 1-2 of D-52: battery alone gives no room (B8 = B7); 7 of 9 competing-sites designs pass the 0.02 room test; go on to B6-forecast and fresh-seed confirmation | Pre-registered rule |
 
 ---
 
@@ -354,4 +355,11 @@ and walking crowds that drift apart are followed by a greedy pilot.
 - Owner's questions on the announced schedule (is it a raw measurement under D-24?), "AI ties the forecaster" as an H2
   outcome, and longer recharge missions (later) stay open; the announced cells are built and measured, but the AI uses them
   only if the owner confirms.
+
+### D-53 Outcome of D-52 phases 1-2
+Phase 1: the simple battery rule B8 equals or beats circling at 12 and 13 Wh, so a battery-only redesign leaves no room for an
+AI (as predicted). Phase 2: a pilot that knows the future beats the best simple pilot by +0.025 to +0.108 in 7 of 9 designs
+(Chapter 7.12); the two 1.0 km designs with a gradual switch fail; 1.5 km with a 3-minute switch passes only just (+0.0201),
+reported as borderline. As pre-registered, nothing counts yet: B6-forecast is added and the passing designs are re-measured on
+fresh scenarios before any AI is trained on them.
 

@@ -14,6 +14,7 @@ nothing", it proves nothing. Each rival plays exactly the same game (`env.step()
 | B5 | Energy-aware | like B3, but moves only if the coverage gain x 10 s exceeds the extra energy cost of moving; that cost is clamped at 0 because forward flight is cheaper than hovering, so B5 behaves like B3 (D-14) | |
 | B6 | Grid search + altitude | like B3, but tries 5 altitudes (50, 100, 150, 200, 300 m) at every grid spot | added 10-19 (D-16) |
 | B7 | Circling pilot | chooses spots like B6, but circles them (radius 50 m) at the speed that uses the least power (9.8 m/s) instead of hovering | added 10-21 (D-45, 7.10) |
+| B8 | Battery rule | flies like B6, circles instead of hovering once the battery would not last | added 10-22 (D-52, 7.12) |
 | B3obs, B3obsU, B3obsUO | Information ladder | B3's search with only the AI's capped maps / uncapped maps / plus buildings; diagnostic only, not in the default runs | added 10-21 (D-37, Chapter 8.7) |
 
 The baselines see the true user positions (privileged information); the AI only sees maps. That makes them a strong test.
@@ -350,4 +351,50 @@ on seeds 0-99 equals the G3 table (0.741). **Not verified:** a finer grid (that 
 planner is optimal for its model of the game, whose score is 0.005 above the replay.
 
 **Reproduce:** `python oracle.py` (see its `--help`; coverage tables are cached in `results/oracle_cache/`).
+
+## 7.12 Competing sites: where an AI that thinks ahead could win (D-52, phases 1-2, 2026-10-22)
+**Plain words.** Step 3 showed that walking crowds leave no room for an AI: the drone easily keeps up. So we built new
+scenarios, pre-registered before any run (D-52): survivors at two or three **sites 1.0-2.0 km apart**, and at some moment
+between 60 and 150 s **half or more of the people who need the drone switch from site A to site B** (a shelter opens at B
+and people are taken there; equivalently a tower is repaired at A and survivors are found at B), either at once or spread
+over 1 or 3 minutes. A drone that sees it coming can start flying to B early; a pilot that only reacts arrives 1-2 minutes
+late. All runs use the owner's G5 settings (adaptive NOMA, imperfect SIC 0.05, rescue users first, acceleration limit 4 m/s^2).
+
+**How it is built.** An `active[t, user]` mask: users who switch off leave the "people to serve" count and get no radio
+resources; equally many users at B switch on, so the crowd size, the class mix and the bandwidth stay the same. New profiles
+`sites_d{10,15,20}_t{0,60,180}` only; with no mask the game is bit-for-bit the old one (tests for all four radio schemes and
+a whole B6 mission; the old control run still gives 0.7206). 26 new tests.
+
+**Phase 1: is a tight battery alone enough? No.** A one-line rule, **B8** (fly like B6, but circle instead of hovering once
+the battery would not last), captures the whole battery decision on `hard` (100 scenarios):
+
+| Battery | B6 (hovers) | B7 (circles) | B8 (rule) |
+|---|---|---|---|
+| 12 Wh | 0.596 | 0.716 | **0.716** |
+| 13 Wh | 0.652 | 0.730 | **0.733** |
+
+So, as the reviewer predicted, there is nothing left for an AI to win from the battery alone.
+
+**Phase 2: room for an AI in the competing-sites scenarios** (12 scenarios per design; a pilot told the future, replayed in
+the real game, minus the best of B6, B7 and B8 in that same scenario; pass mark +0.02):
+
+| Sites apart (flight time) | Sudden switch | Switch over 1 min | Switch over 3 min |
+|---|---|---|---|
+| 1.0 km (67 s) | **+0.025** ✓ | +0.009 | +0.005 |
+| 1.5 km (100 s) | **+0.072** ✓ | **+0.039** ✓ | +0.020 ✓ (borderline) |
+| 2.0 km (133 s) | **+0.108** ✓ | **+0.098** ✓ | **+0.056** ✓ |
+
+The best simple pilot is B6 in every design (scores 0.64-0.86). **7 of 9 designs pass**; the 1.5 km, 3-minute design passes
+only just (+0.0201) and is treated as borderline. The pattern is physical: **room appears when the flight across (distance /
+15 m/s) is about as long as or longer than the switch**. Most of the gain comes after the switch (anticipation pays off when the
+demand moves), part before it (flying towards B early).
+
+**Caveats.** 12 scenarios per design (reduced from 20 for time); not yet confirmed on fresh scenarios; the future-knowing
+pilot ignores energy and the acceleration limit in its planning (so the true room is if anything larger); B6-forecast (a simple
+pilot that also uses an announced schedule) is not built yet. One B8 run died 2 s before the end where B7 survived (the rule has
+no safety margin), not changed because the rule was fixed in advance.
+
+**Next (D-52):** add B6-forecast, confirm the passing designs on fresh scenarios, then train the AI there (G5).
+
+**Reproduce:** `python sites_exp.py phase1`, `python sites_exp.py headroom`, `python sites_exp.py report`.
 

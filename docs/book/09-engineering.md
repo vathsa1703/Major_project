@@ -32,7 +32,7 @@ uav_dataset/
   access_benchmark.py    the four access schemes at each scheme's best spot (one snapshot)
   altitude_by_class.py   Gate G2 diagnostic (best altitude per user class)
   mobility_check.py      H1 check (fixed drone vs best position over time)
-  test_*.py              315 tests
+  test_*.py              343 tests
 ```
 Not committed: `uav_dataset/data/`, `data_v1/`, `results/`, logs, Excel files, `docs/papers/` (local copies of papers).
 
@@ -56,7 +56,7 @@ deletion; admin enforcement off.
 Lint rules: ruff E, F, W, I, B with line length 120; E741, E702 and E731 ignored (single-letter names, `a; b` and short lambdas
 are normal in the math code).
 
-## 9.4 Tests (315 on 2026-10-21)
+## 9.4 Tests (343 on 2026-10-22)
 | File | Tests | Covers |
 |---|---|---|
 | `test_noma.py` | 9 | gain vs distance, rate vs power, power split, SIC check (forced failure), pairing, scenario variety, class mix |
@@ -71,6 +71,7 @@ are normal in the math code).
 | `test_rl.py` | 45 | control modes, waypoint flight, decision hold, scenario pool, static crowd, reward parts, observation groups, model settings, viewer pilots, PPO smoke, Dict observation, uncapped maps, crowd size, history, fresh seed pool, privileged state only when asked, the AI never asks for it when flying |
 | `test_rl_net.py` | 11 | CNN output size, reproducibility, position sensitivity, PPO with CNN, noise annealing, Dict extractor, the actor's output unchanged when only privileged data changes (before and after training), SAC save/load |
 | `test_accel_loiter.py` | 24 | acceleration limit off = old results bit-exact, limit bound, shaking exploit closed, energy formula, braking without overshoot, B7 circle radius and speed, run-to-empty prediction |
+| `test_sites.py` | 26 | competing sites: old results bit-exact with an all-active mask (all four radio schemes, a whole B6 mission), coverage only over active users, the switch schedule, site distance and map bounds, walking speed caps, the countdown off by default, B8 behaviour, the oracle on sites profiles |
 | `test_oracle.py` | 22 | coverage table equals the game's evaluation, evaluate(t) leaves the game untouched, the planner's first move equals B6's, every planned move is flyable, planner equals brute force on a small grid, bound never below the planner, replay deterministic, never imported by the AI code |
 | `test_dashboard_core.py` | 16 | dashboard logic without streamlit: same settings give the same disaster, trace equals the experiment code, maps render, comparisons, plan and battery advice |
 | `test_access.py` | 45 | adaptive NOMA and optimised OMA: closed form, imperfect SIC, brute force on small crowds, power budget, monotone in power, odd crowds, rescue first, old schemes unchanged |
