@@ -443,3 +443,13 @@ rule fired (D-51): today's moving crowds leave no room for an AI that anticipate
 negative result found *before* two weeks of training. The scenarios must be redesigned before G5; the owner chooses how.
 The owner also merged PRs #13, #14 and #15 (tracks 1 and 2, step 5, the dashboard).
 
+## 2026-10-22
+
+### 52. Back to the roadmap: redesigning the scenarios, rules first
+The owner merged PR #16, asked what the reviewer thought of my redesign (it had not seen it yet, so I sent it: review round 4),
+and then pulled us back to the roadmap after side questions about NOMA pairing, bit-error rate and wind (parked in the backlog;
+wind and GPS are Stage 3). The reviewer showed that my proposal (tight battery + crowds drifting apart) would most likely fail,
+and that room for an AI appears when *demand switches between distant sites* faster than the drone can cross. The owner
+approved the redesign and asked that it not affect earlier results: everything is new profiles and options off by default.
+The full design, baselines and pass mark were written down as D-52 **before** anything was built or run.
+

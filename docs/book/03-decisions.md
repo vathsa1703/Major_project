@@ -57,6 +57,7 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-49 | 10-21 | Still-crowd fixes (G4b: move-by steering, longer training, bigger net; fix C) go to the backlog; the move-by fix is tested inside G5 | Owner |
 | D-50 | 10-21 | New roadmap (stages 0-5) replaces the 10-19 order; dashboard built now as a parallel showcase track (Streamlit approved) | Owner |
 | D-51 | 10-21 | Clairvoyant test: no room for anticipation in today's moving-crowd scenarios (+0.002 < 0.02); redesign scenarios before G5 | Pre-registered rule |
+| D-52 | 10-22 | Scenario redesign 'competing sites', PRE-REGISTERED before any run: design grid, baselines, pass mark, fresh-seed confirmation, negative control | Owner + reviewer |
 
 ---
 
@@ -325,4 +326,32 @@ Pre-registered rule (step 3 plan): if a pilot that knows the crowd's whole futur
 crowd type, the moving-crowd scenarios leave no room for an anticipating AI, and they are redesigned before G5. Result: +0.001 to
 +0.003 for every type (Chapter 7.11). The rule fired. G5 does not start on today's scenarios; the redesign direction is the
 owner's choice (options in Chapter 14.8 progress note).
+
+### D-52 Scenario redesign: competing sites (pre-registered on 2026-10-22, before any result)
+Why: step 3 (D-51) showed that a pilot knowing the future gains only +0.002 over B6, because the drone (15 m/s, re-planning
+every 10 s) is much faster than walking crowds. A fourth review round (reviewer's 1-D toy model) showed where room appears:
+when **demand switches between sites far apart faster than the drone can fly across** (two sites 1.5 km apart, abrupt switch:
++0.077; 0.8 km: +0.031). A tight battery alone is expected to fail (one simple rule, B8, captures the hover/circle choice),
+and walking crowds that drift apart are followed by a greedy pilot.
+
+**Design (fixed now):**
+- New profiles only (`sites_*`); existing profiles and global defaults unchanged; every new feature off by default, with
+  old results bit-exact (tests). The owner's G5 settings (D-48) live inside the new profiles.
+- Map 2 x 2 km, 20 dBm; 2-3 sites; crowds still or drifting <= 1 m/s (bursts <= 3 m/s).
+- Event: at t0 in [60, 150] s a share of 50-70% of the active demand moves from site A to site B within tau seconds,
+  through an `active[t, user]` mask (inactive users leave the coverage denominator and get no resources; total bandwidth fixed).
+  Event types and their disaster justification: a ground tower restored at a known time (users at A leave the drone), a rescue
+  operation or shelter opening at B (users arrive), survivors appearing after an aftershock or flood front.
+- **Design grid:** site distance D in {1.0, 1.5, 2.0 km} x tau in {0, 60, 180 s} x {announced (countdown), unannounced},
+  battery 16 Wh; the passing cells are then repeated at 12-13 Wh.
+- **Baselines (the bar):** the best per cell of B6, B7, B8 (B6 targets; circle when the battery would not last) and B6fc
+  (forecasting greedy using only what the agent can observe: the announced schedule, crowd velocities from the last frame).
+- **Headroom test:** clairvoyant DP (energy-free first; energy-aware DP only on passing cells) minus the best baseline,
+  **pass mark >= 0.02 coverage**; measured on design seeds 0-99, then **re-measured on fresh seeds** before it counts.
+- **Report every cell** (a regime map by transit time / demand time scale), including cells with no room.
+- **Negative control:** today's `hard` (headroom 0.002): a later AI must not beat B6 there; if it does, look for a bug.
+- **Never change these scenarios after seeing AI results.** RL trains on seeds 10,000+, is chosen on val, test read once.
+- Owner's questions on the announced schedule (is it a raw measurement under D-24?), "AI ties the forecaster" as an H2
+  outcome, and longer recharge missions (later) stay open; the announced cells are built and measured, but the AI uses them
+  only if the owner confirms.
 
