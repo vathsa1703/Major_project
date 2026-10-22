@@ -62,7 +62,7 @@ def make_scenario(seed):
     s_lo, s_hi = CFG["scatter_fraction_range"]
     n = int(rng.choice(CFG["n_users_choices"]))
     assert n % 2 == 0, "n_users must be even (NOMA pairs)"
-    return {
+    sc = {
         "seed": seed,
         "n_users": n,
         "n_clusters": int(rng.integers(k_lo, k_hi + 1)),
@@ -75,11 +75,157 @@ def make_scenario(seed):
         "mobility": str(rng.choice(CFG["mobility"]["choices"])),
         "n_obstacles": int(rng.integers(CFG["obstacles"]["n_range"][0], CFG["obstacles"]["n_range"][1] + 1)),
     }
+    if sc["mobility"] == "sites":                    # competing sites (D-52); other scenarios are unchanged
+        sc.update(make_sites(seed))
+        sc["n_clusters"] = sc["n_sites"]
+    return sc
+
+
+# ---------------------------------------------------------------- competing sites (D-52; config section `sites:`)
+def place_sites(rng, radius, D, L, max_draws, min_sep):
+    """Site centres (k, 2) for radii `radius` (k,): A and B exactly D apart, every site disc inside the L x L map,
+    site C (if k == 3) at least min_sep from A and B (or, if no draw of the batch manages, the farthest one).
+    For a direction theta, the A centres whose B = A + D (cos, sin) also fits form a box; the first direction of the
+    batch with a non-empty box is used, and A is uniform in that box. Deterministic for a seeded rng."""
+    rA, rB = radius[0], radius[1]
+    th = rng.uniform(0.0, 2.0 * np.pi, size=max_draws)
+    ux, uy = D * np.cos(th), D * np.sin(th)
+    xlo, xhi = np.maximum(rA, rB - ux), np.minimum(L - rA, L - rB - ux)
+    ylo, yhi = np.maximum(rA, rB - uy), np.minimum(L - rA, L - rB - uy)
+    ok = (xhi >= xlo) & (yhi >= ylo)
+    assert ok.any(), f"site distance {D} m does not fit in a {L} m map"
+    i = int(np.argmax(ok))
+    f = rng.uniform(size=2)
+    A = np.array([xlo[i] + f[0] * (xhi[i] - xlo[i]), ylo[i] + f[1] * (yhi[i] - ylo[i])])
+    centres = [A, A + np.array([ux[i], uy[i]])]
+    if len(radius) > 2:
+        rC = radius[2]
+        cand = rng.uniform(rC, L - rC, size=(max_draws, 2))
+        dmin = np.minimum(np.linalg.norm(cand - centres[0], axis=1), np.linalg.norm(cand - centres[1], axis=1))
+        good = dmin >= min_sep
+        centres.append(cand[int(np.argmax(good))] if good.any() else cand[int(np.argmax(dmin))])
+    return np.array(centres)
+
+
+def make_sites(seed):
+    """Scenario fields of a competing-sites scenario. Event timing and share come from their own rng stream, so they
+    are the same in every design-grid cell (D, tau) for a seed (paired cells); the geometry from another stream."""
+    s, L = CFG["sites"], CFG["area_m"]
+    ev = np.random.default_rng([seed, 6])
+    t0 = int(ev.integers(s["t0_range_s"][0], s["t0_range_s"][1] + 1))
+    share = float(ev.uniform(*s["share_range"]))
+    k = int(ev.integers(s["n_sites_range"][0], s["n_sites_range"][1] + 1))
+    geo = np.random.default_rng([seed, 7])
+    radius = geo.uniform(*s["radius_range_m"], size=k)
+    c = place_sites(geo, radius, float(s["distance_m"]), L, int(s["max_draws"]), float(s["min_separation_m"]))
+    return {"n_sites": k, "site_x": c[:, 0].tolist(), "site_y": c[:, 1].tolist(), "site_radius_m": radius.tolist(),
+            "distance_m": float(s["distance_m"]), "tau_s": float(s["tau_s"]), "announced": bool(s["announced"]),
+            "event": str(s["event"]), "event_t0_s": t0, "event_share": share}
+
+
+def n_movers(sc):
+    """Number of users that move from site A to site B: round(share x active users)."""
+    return int(round(sc["event_share"] * sc["n_users"]))
+
+
+def make_site_users(seed, sc):
+    """Users of a competing-sites scenario: n_users ACTIVE users at the start (scatter share as in other scenarios,
+    n_move movers at A, the rest over the sites by Dirichlet weights) plus n_move RESERVE users at B, inactive at the
+    start. Mover k (random order) becomes inactive and its reserve twin (same class) active at t0 + tau * k / n_move.
+    Columns as make_users, plus active_from_s / active_until_s (the user counts while from <= t < until)."""
+    s, L = CFG["sites"], CFG["area_m"]
+    rng = np.random.default_rng([seed, 1])
+    n, k, m = sc["n_users"], sc["n_sites"], n_movers(sc)
+    n_scatter = int(round(n * sc["scatter_fraction"]))
+    rest = n - n_scatter - m
+    assert rest >= 0, "share + scatter fraction must not exceed 1"
+    counts = rng.multinomial(rest, rng.dirichlet(np.full(k, float(s["site_weight_concentration"]))))
+    counts[0] += m                                     # site A also holds the movers
+    site = np.concatenate([np.full(c, j) for j, c in enumerate(counts)] + [np.full(n_scatter, -1), np.full(m, 1)])
+    N = len(site)
+    centres = np.column_stack([sc["site_x"], sc["site_y"]])
+    rad = np.asarray(sc["site_radius_m"])
+    on = site >= 0
+    sid = np.clip(site, 0, None)
+    off = np.zeros((N, 2))
+    todo = on.copy()
+    while todo.any():                                  # truncated Gaussian: redraw the offsets outside the radius
+        p = rng.normal(0.0, 1.0, size=(int(todo.sum()), 2)) * (rad[sid[todo]] / 2)[:, None]
+        off[todo] = p
+        todo[todo] = np.hypot(p[:, 0], p[:, 1]) > rad[sid[todo]]
+    xy = np.where(on[:, None], centres[sid] + off, rng.uniform(0, L, size=(N, 2)))
+    names = list(CFG["classes"])
+    shares = np.array([CFG["classes"][c]["share"] for c in names])
+    cls = np.empty(N, dtype=object)
+    cls[:n] = rng.choice(names, size=n, p=shares / shares.sum())
+    movers = rng.permutation(np.flatnonzero(site[:n] == 0))[:m]       # A users, in switching order
+    reserve = np.arange(n, N)
+    cls[reserve] = cls[movers]
+    t_sw = sc["event_t0_s"] + sc["tau_s"] * np.arange(m) / max(m, 1)
+    act_from, act_until = np.zeros(N), np.full(N, np.inf)
+    act_until[movers], act_from[reserve] = t_sw, t_sw
+    return pd.DataFrame({
+        "seed": seed, "user_id": np.arange(N), "x": np.clip(xy[:, 0], 0, L), "y": np.clip(xy[:, 1], 0, L),
+        "cluster_id": site, "class": cls.astype(str), "min_rate_bps": np.array([CFG["classes"][c]["min_rate_bps"]
+                                                                                for c in cls]),
+        "active_from_s": act_from, "active_until_s": act_until})
+
+
+def activity_mask(u, T, dt):
+    """active[t, user] (T+1, n) for the times t * dt, or None when the users table has no activity columns (every user
+    always counts: all scenarios except competing sites)."""
+    if "active_from_s" not in u:
+        return None
+    t = np.arange(T + 1)[:, None] * dt
+    return (t >= u["active_from_s"].values[None]) & (t < u["active_until_s"].values[None])
+
+
+def simulate_sites(seed, sc, u):
+    """Walking inside the sites: every site user walks random-waypoint legs to uniform points of its own site disc
+    (so it never leaves the disc), each leg at a speed from sites.speed_mps, or with probability burst_prob from
+    burst_speed_mps (cap 3 m/s). Scattered users stand still. Same output as simulate_positions."""
+    s, mob = CFG["sites"], CFG["mobility"]
+    rng = np.random.default_rng([seed, 3])
+    dt, T = mob["dt_s"], mob["episode_steps"]
+    pos = u[["x", "y"]].values.astype(float)
+    n = len(pos)
+    cid = u["cluster_id"].values
+    walk = cid >= 0
+    sid = np.clip(cid, 0, None)
+    centre = np.column_stack([np.asarray(sc["site_x"])[sid], np.asarray(sc["site_y"])[sid]])
+    rad = np.where(walk, np.asarray(sc["site_radius_m"])[sid], 0.0)
+
+    def legs(idx):
+        r = rad[idx] * np.sqrt(rng.uniform(size=len(idx))); a = rng.uniform(0, 2 * np.pi, len(idx))
+        tgt = centre[idx] + np.column_stack([r * np.cos(a), r * np.sin(a)])
+        burst = rng.uniform(size=len(idx)) < s["burst_prob"]
+        fast = rng.uniform(*s["burst_speed_mps"], size=len(idx))
+        return tgt, np.where(burst, fast, rng.uniform(*s["speed_mps"], size=len(idx)))
+
+    target, speed = pos.copy(), np.zeros(n)
+    idx = np.flatnonzero(walk)
+    target[idx], speed[idx] = legs(idx)
+    P = np.empty((T + 1, n, 2)); V = np.empty((T + 1, n, 2))
+    for t in range(T + 1):
+        d = target - pos
+        dist = np.linalg.norm(d, axis=1)
+        step = speed * dt
+        arrive = dist <= step
+        new = np.where(arrive[:, None], target, pos + d / np.maximum(dist, 1e-9)[:, None] * step[:, None])
+        re = np.flatnonzero(arrive & walk)
+        if len(re):
+            target[re], speed[re] = legs(re)
+        P[t], V[t] = pos, (new - pos) / dt
+        pos = new
+    return P, V
 
 
 def make_users(seed, sc=None):
-    """Users in clusters (2D Gaussian, truncated) + scattered users, with a QoS class each."""
+    """Users in clusters (2D Gaussian, truncated) + scattered users, with a QoS class each.
+    Competing-sites scenarios (mobility `sites`) have their own generator, make_site_users."""
     sc = sc or make_scenario(seed)
+    if sc.get("mobility") == "sites":
+        return make_site_users(seed, sc)
     rng = np.random.default_rng([seed, 1])
     L = CFG["area_m"]
     n = sc["n_users"]
@@ -160,6 +306,8 @@ def link_blocked(ux, uy, X, Y, boxes):
 def simulate_positions(seed, sc, u):
     """Move the users of one scenario for the configured number of steps (vectorized over users).
     Returns pos, vel of shape (T+1, n, 2). vel[t] is the velocity applied in the step that starts at t."""
+    if sc["mobility"] == "sites":
+        return simulate_sites(seed, sc, u)
     mob = CFG["mobility"]
     rng = np.random.default_rng([seed, 3])
     L, dt, T = CFG["area_m"], mob["dt_s"], mob["episode_steps"]

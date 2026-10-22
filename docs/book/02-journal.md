@@ -443,3 +443,24 @@ rule fired (D-51): today's moving crowds leave no room for an AI that anticipate
 negative result found *before* two weeks of training. The scenarios must be redesigned before G5; the owner chooses how.
 The owner also merged PRs #13, #14 and #15 (tracks 1 and 2, step 5, the dashboard).
 
+## 2026-10-22
+
+### 52. Back to the roadmap: redesigning the scenarios, rules first
+The owner merged PR #16, asked what the reviewer thought of my redesign (it had not seen it yet, so I sent it: review round 4),
+and then pulled us back to the roadmap after side questions about NOMA pairing, bit-error rate and wind (parked in the backlog;
+wind and GPS are Stage 3). The reviewer showed that my proposal (tight battery + crowds drifting apart) would most likely fail,
+and that room for an AI appears when *demand switches between distant sites* faster than the drone can cross. The owner
+approved the redesign and asked that it not affect earlier results: everything is new profiles and options off by default.
+The full design, baselines and pass mark were written down as D-52 **before** anything was built or run.
+
+### 53. We found where an AI could win
+The redesign agent built the competing-sites scenarios and the B8 battery rule exactly as pre-registered (D-52), with 26 tests
+and every old result protected, and ran about 3 hours of measurements on one process. The battery alone gives no room (B8
+does as well as circling), but when people switch between sites far apart, a pilot that knows what is coming serves up to 11
+more people per 100 than the best simple pilot: 7 of 9 designs pass (Chapter 7.12, D-53). I re-computed the table from the raw
+data (identical), ran the 343 tests and checked the old control result (0.7206). The owner asked for a plain-English summary
+of the whole project as a PDF (`docs/summary/UAV-NOMA-Summary.pdf`), updated here with the final numbers. During the wait the
+owner asked why we compare the AI with programmed pilots and with a future-knowing one, whether the earlier "AI loses" results
+were wasted (no: they are the "where AI does not help" half of the answer H2 asks for), and whether a bigger map would help
+(not by itself: thinking ahead pays only when distance and fast change come together).
+

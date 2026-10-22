@@ -22,6 +22,13 @@ Opt-in extras (Track 2; the default observation above is unchanged):
               history       the drone's own last `history_len` (x, y, measured coverage) at decision times, oldest first
               heat_all_u    UNCAPPED map: sqrt(share of all users per cell), in [0, 1], never saturates
               heat_rescue_u the same for the rescue users
+              event_countdown seconds to the ANNOUNCED event / episode length, clipped to [0, 1] (0 once it has
+                            started); 1 when the scenario has no announced event. OFF by default: the owner has not
+                            decided whether the AI may use it (D-52)
+  Competing sites (mobility `sites`, D-52): users carry an activity mask active[t, user] (make_dataset.activity_mask).
+  Only the users active at t count: coverage denominator, radio resources (every access scheme runs on the active subset
+  with the scenario's fixed total bandwidth), evaluate(t), the maps and the critic-only state. Without a mask (every
+  other scenario) the arrays are the full ones, exactly as before.
   obs_mode="dict"           gymnasium Dict observation: "maps" (C, grid, grid) and "scalars" (vector)
   privileged=True           (dict mode only) adds "priv_maps" and "priv_n": the TRUE state, for an asymmetric critic
                             during training only. The acting policy never reads them (see rl_net.DictMapExtractor and
@@ -37,7 +44,7 @@ CFG = md.CFG
 # The default observation is built from these named groups, always in this order (scalars first, then the two maps).
 OBS_GROUPS = ("pos", "vel", "battery", "time", "prev", "heat_all", "heat_rescue")
 # Every group that exists, in canonical order (OBS_GROUPS keep their relative order, so the default is unchanged).
-ALL_GROUPS = ("pos", "vel", "battery", "time", "prev", "crowd_n", "history",
+ALL_GROUPS = ("pos", "vel", "battery", "time", "prev", "crowd_n", "history", "event_countdown",
               "heat_all", "heat_all_u", "heat_rescue", "heat_rescue_u")
 MAP_GROUPS = ("heat_all", "heat_all_u", "heat_rescue", "heat_rescue_u")
 # Critic-only keys of the Dict observation (true state). Any key starting with "priv" is privileged.
@@ -98,7 +105,7 @@ class UAVEnv(gym.Env):
 
     @staticmethod
     def group_sizes(grid):
-        return {"pos": 3, "vel": 3, "battery": 1, "time": 1, "prev": 3, "crowd_n": 1,
+        return {"pos": 3, "vel": 3, "battery": 1, "time": 1, "prev": 3, "crowd_n": 1, "event_countdown": 1,
                 "history": 3 * CFG["env"]["history_len"], **{g: grid**2 for g in MAP_GROUPS}}
 
     @staticmethod
@@ -140,6 +147,7 @@ class UAVEnv(gym.Env):
         self.users = md.make_users(self.scenario_seed, self.sc)
         self.boxes = md.obstacle_array(md.make_obstacles(self.scenario_seed, self.sc))
         self.P, self.V = md.simulate_positions(self.scenario_seed, self.sc, self.users)   # (T+1, n, 2)
+        self.active = md.activity_mask(self.users, self.T, self.dt)    # (T+1, n) bool, or None = everyone counts
         self.min_rate = self.users["min_rate_bps"].values
         self.rescue = (self.users["class"] == "rescue").values
         self.rng = np.random.default_rng([self.scenario_seed, 5])      # fading + random pairing, per scenario
@@ -162,7 +170,27 @@ class UAVEnv(gym.Env):
         return self._obs(groups, dict_obs, history_every, privileged)
 
     def user_xy(self, t=None):
+        """Positions of ALL users (including the inactive ones of a competing-sites scenario; see users_now)."""
         return self.P[self.t if t is None else t]
+
+    def active_mask(self, t=None):
+        """Which users count at time index t (default now): bool (n,), or None when everyone always counts."""
+        return None if self.active is None else self.active[self.t if t is None else int(t)]
+
+    def users_now(self, t=None):
+        """(xy, min_rate, rescue) of the users that count at time index t (default now). Without an activity mask
+        these are exactly the full arrays (old behaviour)."""
+        xy, m = self.user_xy(t), self.active_mask(t)
+        if m is None:
+            return xy, self.min_rate, self.rescue
+        return xy[m], self.min_rate[m], self.rescue[m]
+
+    def event_countdown(self):
+        """Seconds to the announced event / episode length, in [0, 1] (0 once it started); 1 if none is announced."""
+        t0 = self.sc.get("event_t0_s")
+        if t0 is None or not self.sc.get("announced", False):
+            return 1.0
+        return float(np.clip((t0 - self.t * self.dt) / (self.T * self.dt), 0.0, 1.0))
 
     def evaluate(self, X, Y, H, p_w, t=None):
         """Coverage the drone WOULD get at each candidate position (X, Y, H arrays) with transmit power p_w (W),
@@ -170,21 +198,29 @@ class UAVEnv(gym.Env):
         env state or the env rng. Used by the search baselines (B3, B4, B5, B6) and, with a future t, by the
         clairvoyant oracle (oracle.py)."""
         t = self.t if t is None else int(t)
-        ux, uy = self.user_xy(t).T
+        xy, min_rate, rescue = self.users_now(t)          # only the users active at t (all, without a mask)
+        ux, uy = xy.T
         X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
         gains = md.channel_gain(ux, uy, X, Y, H, self.boxes)
         rng = np.random.default_rng([self.scenario_seed, t])
         if self.access in md.QOS_SCHEMES:                 # vectorised over all candidates at once
-            return self.access_rates(gains, p_w, return_info=True)[1]["served"].mean(axis=1)
+            return self.access_rates(gains, p_w, return_info=True, min_rate=min_rate,
+                                     rescue=rescue)[1]["served"].mean(axis=1)
         pick = 0 if self.access == "noma" else 1
         return np.array([
             (md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"], rng)[pick]
-             >= self.min_rate).mean() for g in gains])
+             >= min_rate).mean() for g in gains])
 
-    def access_rates(self, gains, p_w, return_info=False):
-        """Rates under this env's QoS-aware scheme (oma_opt / noma_opt) for gains (N,) or (P, N)."""
-        return md.access_rates(gains, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.min_rate, self.access,
-                               eps=self.sic_eps, rescue=self.rescue, rescue_first=self.rescue_first,
+    def access_rates(self, gains, p_w, return_info=False, min_rate=None, rescue=None):
+        """Rates under this env's QoS-aware scheme (oma_opt / noma_opt) for gains (N,) or (P, N).
+        min_rate / rescue default to the users that count now when the gains are for them (competing sites), else
+        to all users (every other scenario: the same thing)."""
+        if min_rate is None:
+            _, min_rate, rescue = self.users_now()
+            if np.shape(gains)[-1] != len(min_rate):
+                min_rate, rescue = self.min_rate, self.rescue
+        return md.access_rates(gains, p_w, self.noise_psd, self.sc["bandwidth_hz"], min_rate, self.access,
+                               eps=self.sic_eps, rescue=rescue, rescue_first=self.rescue_first,
                                return_info=return_info)
 
     # ------------------------------------------------------------------ step
@@ -220,30 +256,31 @@ class UAVEnv(gym.Env):
         self.x, self.y, self.h = float(nx), float(ny), float(nh)
         self.t += 1
 
-        ux, uy = self.user_xy().T
+        xy, min_rate, rescue = self.users_now()           # only the users that count now (all, without a mask)
+        ux, uy = xy.T
         g = md.channel_gain(ux, uy, np.array([self.x]), np.array([self.y]), np.array([self.h]), self.boxes,
                             self.rng, self.fading)[0]
         rate_noma, rate_oma = md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"],
                                             self.rng)
         extra = {}
         if self.access in md.QOS_SCHEMES:
-            rate, acc = self.access_rates(g, p_w, return_info=True)
+            rate, acc = self.access_rates(g, p_w, return_info=True, min_rate=min_rate, rescue=rescue)
             served = acc["served"]
             extra = dict(pairs=int(acc["pairs"]), noma_pairs=int(acc["noma_pairs"]),
                          alpha_lt_half=int(acc["alpha_lt_half"]))
         else:
             rate = rate_noma if self.access == "noma" else rate_oma
-            served = rate >= self.min_rate
+            served = rate >= min_rate
         # the fixed schemes are always reported, so every run also shows what they would have given
-        both = dict(coverage_noma=float((rate_noma >= self.min_rate).mean()),
-                    coverage_oma=float((rate_oma >= self.min_rate).mean()),
+        both = dict(coverage_noma=float((rate_noma >= min_rate).mean()),
+                    coverage_oma=float((rate_oma >= min_rate).mean()),
                     sum_rate_noma_mbps=float(rate_noma.sum() / 1e6), sum_rate_oma_mbps=float(rate_oma.sum() / 1e6))
         coverage = float(served.mean())
         both.update(coverage_access=coverage, sum_rate_access_mbps=float(rate.sum() / 1e6),
                     fairness_served=md.jain(rate[served]) if served.any() else 0.0, **extra)
         self.prev = dict(
             coverage=coverage,
-            throughput=float(min(1.0, rate.sum() / (2.0 * self.min_rate.sum()))),
+            throughput=float(min(1.0, rate.sum() / (2.0 * min_rate.sum()))),
             fairness=md.jain(rate))
 
         e_step = float(md.energy_step_j(np.hypot(self.vx, self.vy), self.vz, p_w,
@@ -260,7 +297,12 @@ class UAVEnv(gym.Env):
         terminal_term = -CFG["env"]["terminal_penalty"] * (1.0 - coverage) if terminated else 0.0
         reward = coverage + energy_term + terminal_term
         truncated = (not terminated) and self.t >= self.T
-        info = self._info(served, rate=rate, energy_step_j=e_step, p_tx_w=p_w)
+        info = self._info(served, rate=rate, energy_step_j=e_step, p_tx_w=p_w, rescue=rescue)
+        mask = self.active_mask()
+        if mask is not None:                       # report per user of the whole pool: inactive users are not served
+            full = np.zeros(len(mask), bool)
+            full[mask] = served
+            info.update(served=full, active=mask.copy(), n_active=int(mask.sum()))
         # each reward part is reported separately, so reward hacking can be spotted
         info.update(reward_coverage=coverage, reward_energy=energy_term, reward_terminal=terminal_term,
                     accel_mps2=accel)
@@ -294,14 +336,14 @@ class UAVEnv(gym.Env):
         return np.array([self.track[i] for i in idx], dtype=float).ravel()
 
     def _map(self, g):
-        xy = self.user_xy()
+        xy, _, rescue = self.users_now()          # maps count only the users active now
         if g == "heat_all":
             return self._heatmap(xy)
         if g == "heat_rescue":
-            return self._heatmap(xy[self.rescue])
+            return self._heatmap(xy[rescue])
         # uncapped: sqrt(share per cell). In [0, 1] (1 only if everyone stands in one cell) and invertible, so it
         # carries exactly the true share without the x10 cap; sqrt spreads small shares (1% -> 0.1, 25% -> 0.5).
-        return np.sqrt(self._shares(xy if g == "heat_all_u" else xy[self.rescue], self.grid))
+        return np.sqrt(self._shares(xy if g == "heat_all_u" else xy[rescue], self.grid))
 
     def _scalar(self, g, every):
         u = self.uav
@@ -317,6 +359,8 @@ class UAVEnv(gym.Env):
             return [self.prev["coverage"], self.prev["throughput"], self.prev["fairness"]]
         if g == "crowd_n":
             return [self.crowd_n()]
+        if g == "event_countdown":
+            return [self.event_countdown()]
         return self._history(every)                                    # "history"
 
     def occupancy(self):
@@ -336,12 +380,13 @@ class UAVEnv(gym.Env):
         """CRITIC-ONLY true state (raw, nothing computed by a baseline's scorer): uncapped sqrt-share maps of all
         users and of rescue users, obstacle occupancy, demand (mean min rate per cell / the largest class min rate),
         all on a priv_grid x priv_grid map, plus crowd_n. Maps are stored as uint8 (value x 255)."""
-        p, xy = self.priv_grid, self.user_xy()
+        p = self.priv_grid
+        xy, min_rate, rescue = self.users_now()
         top = max(c["min_rate_bps"] for c in CFG["classes"].values())
         count = self._shares(xy, p) * len(xy)
-        demand = np.divide(self._shares(xy, p, weights=self.min_rate / top) * len(xy), count,
+        demand = np.divide(self._shares(xy, p, weights=min_rate / top) * len(xy), count,
                            out=np.zeros(p * p), where=count > 0)
-        chans = {"density": np.sqrt(self._shares(xy, p)), "rescue": np.sqrt(self._shares(xy[self.rescue], p)),
+        chans = {"density": np.sqrt(self._shares(xy, p)), "rescue": np.sqrt(self._shares(xy[rescue], p)),
                  "obstacles": self.occupancy(), "demand": demand}
         maps = np.stack([chans[c].reshape(p, p) for c in PRIV_CHANNELS])
         return {"priv_maps": np.round(np.clip(maps, 0.0, 1.0) * 255).astype(np.uint8),
@@ -366,14 +411,15 @@ class UAVEnv(gym.Env):
             out.update(self.privileged_state())
         return out
 
-    def _info(self, served, rate=None, energy_step_j=0.0, p_tx_w=0.0):
+    def _info(self, served, rate=None, energy_step_j=0.0, p_tx_w=0.0, rescue=None):
+        rescue = self.rescue if rescue is None else rescue
         used_wh = self.energy_used_j / 3600.0
         info = dict(
             scenario_seed=self.scenario_seed, t=self.t, mobility=self.sc["mobility"], n_users=self.sc["n_users"],
             x=self.x, y=self.y, h=self.h, battery_wh=self.energy_left_j / 3600.0,
             coverage=self.prev["coverage"], fairness=self.prev["fairness"],
             sum_rate_mbps=float(rate.sum() / 1e6) if rate is not None else 0.0,
-            outage_rescue=float(1 - served[self.rescue].mean()) if served is not None and self.rescue.any() else 0.0,
+            outage_rescue=float(1 - served[rescue].mean()) if served is not None and rescue.any() else 0.0,
             energy_step_j=energy_step_j, p_tx_w=p_tx_w,
             served_user_s_per_wh=self.served_user_s / used_wh if used_wh > 0 else 0.0)
         if served is not None:

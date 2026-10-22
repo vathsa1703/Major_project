@@ -39,6 +39,32 @@ mobility:
   surge_start_range_s: [60, 180]  # when the sudden event starts (users are still before that)
   surge_radius_m: 60            # surge: users pile up within this radius of the new point
 
+# Competing sites (D-52 scenario redesign). Used ONLY when a scenario's mobility model is `sites` (the sites_* profiles
+# below); every other scenario ignores this section, so the old datasets and results are bit-exact.
+# The crowd lives at 2-3 sites. Site A holds most of the active demand at the start; at t0 a share s of the ACTIVE
+# demand moves from A to site B, which is distance_m away, ramped linearly over tau_s seconds: the k-th mover of A
+# becomes inactive and its twin at B (same class) becomes active at t0 + tau_s * k / n_move, so the number of active
+# users (and the demand mix) never changes. Inactive users leave the coverage denominator and get no radio resources;
+# the total bandwidth stays the scenario's n_users x bandwidth_per_user_hz (n_users = active users).
+# Default event reading: a shelter opening at B (people are taken from A to B by a rescue operation; the trip itself is
+# not simulated, they leave A's demand and appear at B). The same mechanism also stands for a ground tower restored at A
+# while survivors are found at B. All numbers are ENGINEERING ASSUMPTIONS (D-52 design grid where noted).
+sites:
+  event: shelter_opening        # documentation label only (one mechanism, see above)
+  n_sites_range: [2, 3]         # inclusive (D-52); site C (if any) never takes part in the event
+  distance_m: 1500              # A-B distance D (D-52 grid {1000, 1500, 2000}); exact, both sites inside the map
+  tau_s: 60                     # ramp duration of the move (D-52 grid {0, 60, 180}); 0 = abrupt
+  announced: false              # D-52 grid {announced, unannounced}: only feeds the `event_countdown` observation
+  t0_range_s: [60, 150]         # event start, uniform, whole seconds (D-52)
+  share_range: [0.5, 0.7]       # share s of the active demand that moves, uniform (D-52)
+  radius_range_m: [50, 150]     # site radius, uniform per site; users truncated-Gaussian (std radius/2) inside it
+  min_separation_m: 400         # site C is at least this far from A and B
+  site_weight_concentration: 3.0  # Dirichlet weights of the non-moving active users over the sites
+  speed_mps: [0.0, 1.0]         # walking inside the own site (random waypoint in the site disc), drawn per leg
+  burst_prob: 0.05              # chance that a leg is a burst (hurrying) ...
+  burst_speed_mps: [1.0, 3.0]   # ... at this speed; 3 m/s is the cap for every user (D-52)
+  max_draws: 256                # rejection-sampling batch for site placement (deterministic, seeded)
+
 # radio
 fc_hz: 2000000000
 bandwidth_per_user_hz: 50000    # total bandwidth = n_users x this (200 users -> 10 MHz); keeps per-user rates comparable
@@ -192,6 +218,29 @@ profiles:
     mobility: {choices: [hotspot_jump, surge, group_drift, attraction]}
     energy: {battery_wh: 16}
     baselines: {grid_n: 14}      # keep the grid spacing about the same on the bigger map
+  # Competing sites (D-52, pre-registered): `hard`'s map, power, obstacles and grid, the `sites` crowd (section `sites:`
+  # above) and the owner's G5 settings (D-48: adaptive NOMA with imperfect SIC 0.05 and rescue first, acceleration limit
+  # 4 m/s^2 with the turning-energy term). sites_base = D 1.5 km, tau 60 s. The design-grid cells sites_d<D>_t<tau>
+  # change only the A-B distance and the ramp. The announced/unannounced variants differ only in `sites.announced`,
+  # which feeds the (opt-in) event_countdown observation, so they are not separate profiles here.
+  sites_base: &sites
+    area_m: 2000
+    uav: {p_max_dbm: 20, a_max_mps2: 4}
+    obstacles: {n_range: [3, 8], size_range_m: [60, 200]}
+    mobility: {choices: [sites]}
+    energy: {battery_wh: 16}
+    baselines: {grid_n: 14}
+    env: {access: noma_opt}
+    access: {sic_eps: 0.05, rescue_first: true}
+  sites_d10_t0: {<<: *sites, sites: {distance_m: 1000, tau_s: 0}}
+  sites_d10_t60: {<<: *sites, sites: {distance_m: 1000, tau_s: 60}}
+  sites_d10_t180: {<<: *sites, sites: {distance_m: 1000, tau_s: 180}}
+  sites_d15_t0: {<<: *sites, sites: {distance_m: 1500, tau_s: 0}}
+  sites_d15_t60: {<<: *sites, sites: {distance_m: 1500, tau_s: 60}}
+  sites_d15_t180: {<<: *sites, sites: {distance_m: 1500, tau_s: 180}}
+  sites_d20_t0: {<<: *sites, sites: {distance_m: 2000, tau_s: 0}}
+  sites_d20_t60: {<<: *sites, sites: {distance_m: 2000, tau_s: 60}}
+  sites_d20_t180: {<<: *sites, sites: {distance_m: 2000, tau_s: 180}}
 
 # Reinforcement learning (Gate G4). Train on the training seeds only; pick models on val; touch test once at the end.
 rl:

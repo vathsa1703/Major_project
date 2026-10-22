@@ -1,5 +1,6 @@
-"""Baseline controllers B0-B5, plus B6 (B3 with altitude search) and B7 (B6's targets, but circling at the
-minimum-power speed instead of hovering; plan step 5).
+"""Baseline controllers B0-B5, plus B6 (B3 with altitude search), B7 (B6's targets, but circling at the
+minimum-power speed instead of hovering; plan step 5) and B8 (B6's targets; hovers while the battery would last
+hovering to the end, circles like B7 otherwise; D-52).
 Each one drives the SAME UAVEnv through env.step(), so comparisons are fair.
 
     policy = make_policy("B2")
@@ -119,6 +120,9 @@ class B1FollowCrowd(Policy):
 
     def plan(self, env):
         xy, cid = env.user_xy(), env.users["cluster_id"].values
+        m = env.active_mask()                       # competing sites: only the users that count now
+        if m is not None:
+            xy, cid = xy[m], cid[m]
         ids = cid[cid >= 0]
         if len(ids) == 0:
             self.target = (env.L / 2, env.L / 2, BCFG["altitude_m"])
@@ -139,8 +143,8 @@ class B2KMeans(Policy):
         self.rescue = env.rescue
 
     def plan(self, env):
-        xy = env.user_xy()
-        w = np.where(self.rescue, BCFG["rescue_weight"], 1.0)
+        xy, _, rescue = env.users_now()             # all users (only the active ones in competing sites)
+        w = np.where(rescue, BCFG["rescue_weight"], 1.0)
         centres, labels = kmeans(xy, w, BCFG["kmeans_k"], BCFG["kmeans_iters"], self.rng)
         heavy = np.argmax([w[labels == j].sum() for j in range(len(centres))])
         self.target = (centres[heavy][0], centres[heavy][1], BCFG["altitude_m"])
@@ -298,8 +302,8 @@ class B3ObsUncapped(B3Obs):
     name = "B3obsU"
 
     def maps(self, env):
-        xy = env.user_xy()
-        return cell_shares(env, xy), cell_shares(env, xy[env.rescue])
+        xy, _, rescue = env.users_now()
+        return cell_shares(env, xy), cell_shares(env, xy[rescue])
 
 
 class B3ObsUncappedObstacles(B3ObsUncapped):
@@ -374,6 +378,10 @@ class B7Loiter(B6GridAltitude):
     def act(self, env):
         if self.replan_due(env):
             self.plan(env)
+        return self.loiter_action(env)
+
+    def loiter_action(self, env):
+        """One step of B7's flight around the current target: transit to the circle, then circle at v_loiter."""
         cx, cy = self.centre(env)
         th = self.target[2]
         rx, ry = env.x - cx, env.y - cy
@@ -388,6 +396,41 @@ class B7Loiter(B6GridAltitude):
             v *= env.uav["v_max_mps"] / n
         vn = v / env.uav["v_max_mps"]
         return np.array([vn[0], vn[1], vertical_action(env, th), 2.0 * self.power - 1.0])
+
+
+class B8BatteryAware(B7Loiter):
+    """B8 (hover or circle by the battery; D-52): B6's target choice (grid x altitude levels, every K steps). On station
+    it hovers like B6 while the battery would last hovering to the end of the mission, and circles like B7 otherwise:
+        circle  if  E_left < T_left x E_hover_step,   E_hover_step = md.energy_step_j(0, 0, P_tx)
+    (hover propulsion + comm P_tx / PA efficiency + circuit, per step; T_left = steps left in the episode).
+    Switching rule (hysteresis, so it does not chatter between the two modes every second): hover -> circle at ANY step
+    where the rule says circle (as soon as hovering would no longer last); circle -> hover only at a decision time
+    (every K steps), when the rule is re-evaluated. While circling, the circle gains margin (circling costs less than
+    hovering), so B8 returns to hovering once the saved energy covers hovering to the end.
+    The 'stay' candidate in planning is B6's (the drone's position) while hovering and B7's (the target) while circling.
+    With an ample battery it never circles and is then exactly B6."""
+    name = "B8"
+
+    def reset(self, env):
+        super().reset(env)
+        self.circling = False
+
+    def must_circle(self, env):
+        hover_step_j = md.energy_step_j(0.0, 0.0, env.p_max_w * self.power)
+        return env.energy_left_j < (env.T - env.t) * hover_step_j
+
+    def here(self, env):
+        return self.target if self.circling else (env.x, env.y, env.h)
+
+    def act(self, env):
+        if self.replan_due(env):
+            self.circling = self.must_circle(env)
+            self.plan(env)
+        elif not self.circling and self.must_circle(env):
+            self.circling = True
+        if self.circling:
+            return self.loiter_action(env)
+        return go_to(env, *self.target, self.power)
 
 
 class B4PSO(Policy):
@@ -454,7 +497,7 @@ class B5EnergyAware(Policy):
 
 
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
-            "B6": B6GridAltitude, "B7": B7Loiter,
+            "B6": B6GridAltitude, "B7": B7Loiter, "B8": B8BatteryAware,
             "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles,
             "B3obsN": B3ObsN, "B3obsUN": B3ObsUncappedN}
 

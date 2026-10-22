@@ -97,6 +97,10 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
   STEP 3 DONE (book 7.11, D-51): clairvoyant pilot (oracle.py) beats B6 by only +0.002 on `hard` (every crowd type < 0.02):
   NO ROOM FOR ANTICIPATION in today's scenarios. G5 must NOT start on them; redesign first (owner chooses: tight battery,
   competing crowds, sudden events, narrower footprints) and re-run the clairvoyant test.
+  REDESIGN D-52 (pre-registered) PHASES 1-2 DONE (book 7.12, D-53): profiles `sites_d{10,15,20}_t{0,60,180}` (active mask,
+  G5 settings inside; old results bit-exact). B8 battery rule = B7 (battery alone: no room). Future-knowing pilot minus
+  best simple pilot: +0.025..+0.108, 7/9 designs pass 0.02 (d15_t180 borderline). NEXT: B6-forecast + fresh-seed
+  confirmation (D-52 phase 3-4), then G5 training on passing designs. Plain-English summary: docs/summary/.
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.
