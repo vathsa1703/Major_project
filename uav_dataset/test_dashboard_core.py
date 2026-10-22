@@ -170,6 +170,20 @@ def test_works_without_a_models_folder(tmp_path, monkeypatch):
         dc.run_pilot(dc.Settings(seed=1, **SMALL), dc.AI_PREFIX + "ghost")
 
 
+def test_default_models_dir_falls_back_to_the_committed_showcase_models(tmp_path, monkeypatch):
+    monkeypatch.delenv("UAV_MODELS_DIR", raising=False)
+    monkeypatch.setattr(dc, "HERE", tmp_path)                    # no results/rl here, as on the online deployment
+    assert dc.default_models_dir() == tmp_path / "models"
+    (tmp_path / "results" / "rl" / "m").mkdir(parents=True)
+    assert dc.default_models_dir() == tmp_path / "models"         # a folder without model.zip does not count
+    (tmp_path / "results" / "rl" / "m" / "model.zip").write_bytes(b"x")
+    assert dc.default_models_dir() == tmp_path / "results" / "rl"
+
+
+def test_the_committed_showcase_ai_model_is_listed():
+    assert "e0_best_ai" in dc.list_models(Path(dc.__file__).parent / "models")
+
+
 def test_models_are_listed_from_a_folder(tmp_path):
     (tmp_path / "my_ai").mkdir()
     (tmp_path / "my_ai" / "model.zip").write_bytes(b"not really a model")

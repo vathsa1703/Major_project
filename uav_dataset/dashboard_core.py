@@ -217,7 +217,14 @@ def describe(scn):
 
 # ---------------------------------------------------------------- pilots (baselines, random, any trained AI)
 def default_models_dir():
-    return Path(os.environ.get("UAV_MODELS_DIR") or HERE / "results" / "rl")
+    """UAV_MODELS_DIR if set; else the local training output (results/rl, not in git) if it holds any model; else the
+    small set of showcase models committed in uav_dataset/models (used by the online deployment)."""
+    if os.environ.get("UAV_MODELS_DIR"):
+        return Path(os.environ["UAV_MODELS_DIR"])
+    local = HERE / "results" / "rl"
+    if local.is_dir() and any(p.joinpath("model.zip").is_file() for p in local.iterdir()):
+        return local
+    return HERE / "models"
 
 
 def ai_available():
