@@ -464,3 +464,22 @@ owner asked why we compare the AI with programmed pilots and with a future-knowi
 were wasted (no: they are the "where AI does not help" half of the answer H2 asks for), and whether a bigger map would help
 (not by itself: thinking ahead pays only when distance and fast change come together).
 
+## 2026-10-23
+
+### 55. The AI goes to work where it can win
+Phases 3-4 of the redesign confirmed, on 20 fresh scenarios per design and against a forecasting pilot, that an AI has room in
+5 of 9 designs; a fifth review round found the forecasting pilot leaves too early and that a departure-time version narrows the
+room to the 2 km designs (+4 to +9 per 100). The owner weighed a NOMA-validation stage and a general "test any drone" tool
+(kept focused; the multi-use idea goes to the backlog and business track) and chose to train the AI where it is useful. Built:
+"move by" steering (0 = stay; the target is fixed when the AI decides), the announcement as AI inputs (D-54), and the G5 rules
+(D-55). The owner set up Kaggle access (the key file was placed by the owner; the assistant never saw it); training runs there.
+
+### 56. The AI loses on its best ground; the project finds its own contribution
+The 8 Kaggle-trained AIs were evaluated on the two 2 km designs: all clearly below the best simple pilot (-0.07 to -0.08) and
+below plain B6. The owner was discouraged ("we haven't done anything new"); I listed what is built and proven (H1, H3, the
+circling result, the headroom method, the realistic quadcopter) and explained the difference between "there is room for an
+AI" and "our AI wins". A sixth review proposed turning the findings into a rule (the anticipation number) and a design rule for
+location reports. The owner also realised that a drone base station can help **find** trapped people from their phones, and
+asked to finish fast: four agents now work in parallel (the anticipation rule with the departure-time pilot, the hybrid
+timing AI, the location-information study, a first draft of the final report), with training on Kaggle. The quadcopter
+model and 3D view (Stage 5) were built the same day (4.9).

@@ -11,6 +11,10 @@ Action (continuous, in [-1, 1]): [vx, vy, vz, power]. vx/vy scale to v_max_mps, 
 power maps linearly to 0..P_max (never fully off). The velocity is the command itself, unless uav.a_max_mps2 is set:
 then it moves toward the command by at most a_max * dt per step, and the energy adds the load-factor term
 (make_dataset.load_factor; our extension).
+Stage 5 (opt-in, dynamics="quad" or config quad.enabled): the velocity computed above (same semantics) becomes the
+setpoint of a simulated quadcopter + autopilot (quadsim.py) flown for the 1 s step; position and velocity come from the
+quadcopter, energy uses its airspeed / climb rate / acceleration at every integration step, the flight is logged at
+5 Hz in env.flight and info["quad"] holds attitude, wind and peaks. Default "point" = the old game, bit for bit.
 Observation (float32, all in [-1, 1]): see _obs(). Size = 11 + 2 * grid * grid.
 Reward: v1 = coverage;  v2 = coverage - lambda_energy * (energy_step / hover_energy_step).
 Battery empty -> terminated, with reward -= terminal_penalty * (share of users left uncovered).
@@ -39,12 +43,13 @@ import numpy as np
 from gymnasium import spaces
 
 import make_dataset as md
+import quadsim
 
 CFG = md.CFG
 # The default observation is built from these named groups, always in this order (scalars first, then the two maps).
 OBS_GROUPS = ("pos", "vel", "battery", "time", "prev", "heat_all", "heat_rescue")
 # Every group that exists, in canonical order (OBS_GROUPS keep their relative order, so the default is unchanged).
-ALL_GROUPS = ("pos", "vel", "battery", "time", "prev", "crowd_n", "history", "event_countdown",
+ALL_GROUPS = ("pos", "vel", "battery", "time", "prev", "crowd_n", "history", "event_countdown", "event_announce",
               "heat_all", "heat_all_u", "heat_rescue", "heat_rescue_u")
 MAP_GROUPS = ("heat_all", "heat_all_u", "heat_rescue", "heat_rescue_u")
 # Critic-only keys of the Dict observation (true state). Any key starting with "priv" is privileged.
@@ -56,11 +61,14 @@ class UAVEnv(gym.Env):
 
     def __init__(self, reward=None, fading=None, battery_wh=None, scenario_seeds=None, scenario_overrides=None,
                  obs_groups=None, access=None, obs_mode="box", privileged=False, history_every=None, sic_eps=None,
-                 rescue_first=None):
+                 rescue_first=None, dynamics=None, quad_overrides=None):
         """scenario_seeds: if given, reset() without an explicit scenario_seed draws the scenario from this pool
         (used for training, so the agent only ever sees the training seeds).
         obs_mode: "box" (flat vector, the default) or "dict". privileged: add the critic-only true state (dict only).
-        history_every: seconds between two entries of the `history` group (= the agent's decision rhythm)."""
+        history_every: seconds between two entries of the `history` group (= the agent's decision rhythm).
+        dynamics: "point" = the old point-mass game; "quad" = the commanded velocity is flown by the simulated
+        quadcopter + autopilot (quadsim.py, Stage 5); None = config quad.enabled. quad_overrides: changes to config
+        `quad:` for this env only, e.g. quadsim.wind_overrides(True) for the wind-on preset."""
         # scenario_overrides: e.g. {"n_users": 500, "n_clusters": 4, "mobility": "surge", "n_obstacles": 6} replaces
         # those fields of every scenario the seed would produce (to try your own situation)
         super().__init__()
@@ -96,6 +104,10 @@ class UAVEnv(gym.Env):
         self.p_max_w = 10 ** ((self.uav["p_max_dbm"] - 30) / 10)
         self.noise_psd = 10 ** ((CFG["noise_density_dbm_hz"] + CFG["noise_figure_db"] - 30) / 10)
         self.hover_step_j = md.energy_step_j(0.0, 0.0, 0.0)
+        self.dynamics = dynamics or ("quad" if CFG.get("quad", {}).get("enabled") else "point")
+        assert self.dynamics in ("point", "quad"), f"dynamics must be 'point' or 'quad', not {self.dynamics!r}"
+        self.quad_cfg = quadsim.quad_config(quad_overrides) if self.dynamics == "quad" else None
+        self.quad, self.flight = None, []            # QuadSim (dynamics "quad" only) and its 5 Hz flight log
         self.action_space = spaces.Box(-1.0, 1.0, shape=(4,), dtype=np.float32)
         if not self.dict_obs:
             self.observation_space = spaces.Box(-1.0, 1.0, shape=(self.obs_dim(self.obs_groups, self.grid),),
@@ -106,6 +118,7 @@ class UAVEnv(gym.Env):
     @staticmethod
     def group_sizes(grid):
         return {"pos": 3, "vel": 3, "battery": 1, "time": 1, "prev": 3, "crowd_n": 1, "event_countdown": 1,
+                "event_announce": 6,
                 "history": 3 * CFG["env"]["history_len"], **{g: grid**2 for g in MAP_GROUPS}}
 
     @staticmethod
@@ -161,6 +174,10 @@ class UAVEnv(gym.Env):
         self.prev = dict(coverage=0.0, throughput=0.0, fairness=0.0)
         self.track = [(self.x / self.L, self.y / self.L, 0.0)]          # own (x, y, coverage) every second
         self._occupancy = None                                          # obstacle map, built on first use
+        if self.dynamics == "quad":            # the quadcopter starts in trimmed hover at the same spot; own gust rng
+            self.quad = quadsim.QuadSim(self.scenario_seed, (0.0, self.L, 0.0, self.L, self.uav["h_min_m"],
+                                                             self.uav["h_max_m"]), cfg=self.quad_cfg)
+            self.flight = [self.quad.reset(self.x, self.y, self.h)]
         return self._obs(), self._info(None)
 
     def observation(self, groups=None, dict_obs=None, history_every=None, privileged=None):
@@ -192,6 +209,16 @@ class UAVEnv(gym.Env):
             return 1.0
         return float(np.clip((t0 - self.t * self.dt) / (self.T * self.dt), 0.0, 1.0))
 
+    def event_announce(self):
+        """The rest of the announcement message (owner's decision D-54: the AI may use it, like B6fc): where people
+        move from (site A) and to (site B) as x/L, y/L, the share that moves, and the switch duration / episode
+        length. All zeros when nothing is announced (the countdown then reads 1)."""
+        if self.sc.get("event_t0_s") is None or not self.sc.get("announced", False):
+            return [0.0] * 6
+        T = self.T * self.dt
+        return [self.sc["site_x"][0] / self.L, self.sc["site_y"][0] / self.L, self.sc["site_x"][1] / self.L,
+                self.sc["site_y"][1] / self.L, float(self.sc["event_share"]), float(self.sc["tau_s"]) / T]
+
     def evaluate(self, X, Y, H, p_w, t=None):
         """Coverage the drone WOULD get at each candidate position (X, Y, H arrays) with transmit power p_w (W),
         for the user positions at time index t (default: now, env.t). Average channel (no fading). Does not change
@@ -199,7 +226,14 @@ class UAVEnv(gym.Env):
         clairvoyant oracle (oracle.py)."""
         t = self.t if t is None else int(t)
         xy, min_rate, rescue = self.users_now(t)          # only the users active at t (all, without a mask)
-        ux, uy = xy.T
+        return self.evaluate_users(xy, min_rate, rescue, X, Y, H, p_w, t)
+
+    def evaluate_users(self, xy, min_rate, rescue, X, Y, H, p_w, t):
+        """env.evaluate for a GIVEN user set (positions xy (n, 2), min rates, rescue flags) instead of the users at
+        time index t: the same physics, access scheme, bandwidth and rng recipe (seeded by (scenario, t); used only by
+        the fixed schemes with random pairing). evaluate(..., t) == evaluate_users(*users_now(t), ..., t). Used by B6fc
+        to score a FORECAST user set (baselines.B6Forecast)."""
+        ux, uy = np.asarray(xy, dtype=float).T
         X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
         gains = md.channel_gain(ux, uy, X, Y, H, self.boxes)
         rng = np.random.default_rng([self.scenario_seed, t])
@@ -246,13 +280,32 @@ class UAVEnv(gym.Env):
             az = self.uav["az_max_mps2"] * self.dt
             vz = self.vz + float(np.clip(vz - self.vz, -az, az))
 
-        nx, ny = np.clip(self.x + vh[0] * self.dt, 0, self.L), np.clip(self.y + vh[1] * self.dt, 0, self.L)
-        nh = np.clip(self.h + vz * self.dt, self.uav["h_min_m"], self.uav["h_max_m"])
-        # the stored velocity is the REALISED one: at the map edge or an altitude limit the drone stops on that axis
-        # (a hard geofence stop; the only case where the realised change can exceed a_max * dt)
-        self.vx, self.vy, self.vz = (nx - self.x) / self.dt, (ny - self.y) / self.dt, (nh - self.h) / self.dt
-        accel = float(np.hypot(self.vx - v_prev[0], self.vy - v_prev[1])) / self.dt    # realised horizontal accel.
         use_accel_energy = a_max is not None and CFG["energy"]["accel_power"]
+        quad_info, e_quad = None, None
+        if self.quad is None:                      # the point-mass game (unchanged)
+            nx, ny = np.clip(self.x + vh[0] * self.dt, 0, self.L), np.clip(self.y + vh[1] * self.dt, 0, self.L)
+            nh = np.clip(self.h + vz * self.dt, self.uav["h_min_m"], self.uav["h_max_m"])
+            # the stored velocity is the REALISED one: at the map edge or an altitude limit the drone stops on that
+            # axis (a hard geofence stop; the only case where the realised change can exceed a_max * dt)
+            self.vx, self.vy, self.vz = (nx - self.x) / self.dt, (ny - self.y) / self.dt, (nh - self.h) / self.dt
+            accel = float(np.hypot(self.vx - v_prev[0], self.vy - v_prev[1])) / self.dt   # realised horizontal accel.
+        else:
+            # Stage 5: the commanded velocity is the autopilot's setpoint for this step; position and velocity are
+            # the quadcopter's own (it lags, overshoots, drifts in gusts; the autopilot's geofence keeps it in the map)
+            fl = self.quad.fly((float(vh[0]), float(vh[1]), float(vz)), self.dt)
+            (nx, ny, nh), (self.vx, self.vy, self.vz) = fl["pos"], fl["vel"]
+            accel = float(np.hypot(self.vx - v_prev[0], self.vy - v_prev[1])) / self.dt
+            # energy: Zeng's power at every integration step's AIRSPEED (= ground speed in calm air) and climb rate,
+            # averaged over the step; the turning/acceleration term uses the actual horizontal acceleration
+            e_quad = float(np.mean(md.energy_step_j(fl["airspeed_h"], fl["vz"], p_w,
+                                                    fl["a_h"] if use_accel_energy else None)))
+            self.flight.extend(fl["samples"])
+            r, pch, yw = fl["att"]
+            quad_info = dict(roll_deg=float(np.degrees(r)), pitch_deg=float(np.degrees(pch)),
+                             yaw_deg=float(np.degrees(yw)), tilt_peak_deg=float(np.degrees(fl["tilt_peak"])),
+                             speed_peak_mps=float(fl["speed_peak"]), airspeed_mps=float(fl["airspeed_h"][-1]),
+                             wind_mps=tuple(float(w) for w in fl["wind"]), thrust_ratio=float(fl["thrust_ratio"]),
+                             commanded_mps=(float(vh[0]), float(vh[1]), float(vz)))
         self.x, self.y, self.h = float(nx), float(ny), float(nh)
         self.t += 1
 
@@ -283,8 +336,11 @@ class UAVEnv(gym.Env):
             throughput=float(min(1.0, rate.sum() / (2.0 * min_rate.sum()))),
             fairness=md.jain(rate))
 
-        e_step = float(md.energy_step_j(np.hypot(self.vx, self.vy), self.vz, p_w,
-                                        accel if use_accel_energy else None))
+        if e_quad is None:
+            e_step = float(md.energy_step_j(np.hypot(self.vx, self.vy), self.vz, p_w,
+                                            accel if use_accel_energy else None))
+        else:
+            e_step = e_quad
         self.energy_left_j = max(0.0, self.energy_left_j - e_step)
         self.energy_used_j += e_step
         self.served_user_s += float(served.sum()) * self.dt
@@ -306,6 +362,8 @@ class UAVEnv(gym.Env):
         # each reward part is reported separately, so reward hacking can be spotted
         info.update(reward_coverage=coverage, reward_energy=energy_term, reward_terminal=terminal_term,
                     accel_mps2=accel)
+        if quad_info is not None:
+            info["quad"] = quad_info
         info.update(both, access=self.access)
         return self._obs(), float(reward), bool(terminated), bool(truncated), info
 
@@ -361,6 +419,8 @@ class UAVEnv(gym.Env):
             return [self.crowd_n()]
         if g == "event_countdown":
             return [self.event_countdown()]
+        if g == "event_announce":
+            return self.event_announce()
         return self._history(every)                                    # "history"
 
     def occupancy(self):

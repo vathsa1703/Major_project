@@ -31,7 +31,10 @@ All settings are in `config.yaml`. Change values there, never in the code. One c
 | `make_dataset.py` | All the physics: scenarios, users, mobility, obstacles, channel (Al-Hourani + fading), NOMA/OMA, energy model, sweep |
 | `uav_env.py` | Gymnasium env (`reset`, `step`) built on `make_dataset.py`, so env and dataset cannot disagree |
 | `view_run.py` | Top-down viewer / GIF of one episode (demo policies only, not baselines) |
-| `dashboard.py` / `dashboard_core.py` | Streamlit dashboard (Showcase, Fly, Compare, Plan, About); all its logic is in `dashboard_core.py` (no streamlit import, tested) |
+| `dashboard.py` / `dashboard_core.py` | Streamlit dashboard (Showcase, Fly, Compare, Plan, 3D flight, About); all its logic is in `dashboard_core.py` (no streamlit import, tested) |
+| `quadsim.py` | Stage 5: our own quadcopter model + autopilot (velocity-setpoint mode, tilt/thrust limits, motor lag, drag, wind + gusts). Opt-in: `UAVEnv(dynamics="quad")` or `quad.enabled: true`; off = the point-mass game, bit for bit |
+| `viewer3d.html` | three.js (r128, pinned CDN) 3D viewer template for the dashboard's "3D flight" page (`dashboard_core.flight3d` + `viewer3d_html`) |
+| `sim2sim_exp.py` | The "sim-to-sim gap": B6 and the showcase AI in the point-mass game vs on the quadcopter, calm and windy (`run`, `report`) |
 | `export_excel.py` | Combines the split CSVs into one workbook with a `split` column |
 | `test_*.py` | Tests for NOMA, mobility, obstacles/fading/energy and the env |
 

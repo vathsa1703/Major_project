@@ -276,6 +276,73 @@ def test_make_env_only_wraps_when_asked_to_hold():
     check_env(make_env("goto", hold=10), skip_render_check=True)
 
 
+# ---------------------------------------------------------------- move-by controls ("move this far"; 0 = stay)
+def test_moveby_zero_keeps_the_drone_where_it_is():
+    env = make_env("moveby", hold=10, battery_wh=1000.0)
+    env.reset(seed=3)
+    x0, y0 = env.unwrapped.x, env.unwrapped.y
+    for _ in range(5):
+        env.step(np.zeros(2, dtype=np.float32))
+    assert np.hypot(env.unwrapped.x - x0, env.unwrapped.y - y0) < 1e-9
+
+
+def test_moveby_target_is_fixed_at_the_decision_time():
+    from rl_utils import moveby_radius
+    env = make_env("moveby", hold=10, battery_wh=1000.0)
+    env.reset(seed=3)
+    x0, y0 = env.unwrapped.x, env.unwrapped.y
+    r = moveby_radius(10)
+    assert r == pytest.approx(md.CFG["uav"]["v_max_mps"] * 10)
+    env.step(np.array([0.5, 0.0], dtype=np.float32))                 # one decision: move 0.5 r east, then stop there
+    assert env.unwrapped.x == pytest.approx(x0 + 0.5 * r, abs=1e-3) and env.unwrapped.y == pytest.approx(y0)
+    env.step(np.zeros(2, dtype=np.float32))                          # next decision: stay
+    assert env.unwrapped.x == pytest.approx(x0 + 0.5 * r, abs=1e-3)
+
+
+def test_moveby_is_clipped_to_the_map_and_steers_altitude_and_power():
+    from rl_utils import moveby_to_goto
+    env = UAVEnv(battery_wh=1000.0)
+    env.reset(seed=3)
+    env.x, env.y = 1.0, env.L - 1.0                                  # in a corner: big moves outward are clipped
+    g = moveby_to_goto([-1.0, 1.0], "moveby", env, hold=10)
+    assert g.tolist() == [-1.0, 1.0]
+    g = moveby_to_goto([0.0, 0.0, 1.0, -1.0], "movebyzp", env, hold=10)
+    assert len(g) == 4 and g[2] > 2 * (env.h - md.CFG["uav"]["h_min_m"]) / (md.CFG["uav"]["h_max_m"]
+                                                                          - md.CFG["uav"]["h_min_m"]) - 1
+    assert g[3] == -1.0
+
+
+def test_rl_policy_anchors_moveby_at_each_decision():
+    from rl_utils import RLPolicy, moveby_radius
+
+    class EastModel:
+        def predict(self, obs, deterministic=True):
+            return np.array([1.0, 0.0], dtype=np.float32), None
+
+    env = UAVEnv(battery_wh=1000.0)
+    env.reset(seed=4)
+    x0 = env.x
+    pol = RLPolicy(EastModel(), "moveby", hold=10)
+    pol.reset(env)
+    for _ in range(10):                                              # one held decision: exactly r east, not 10 r
+        env.step(pol.act(env))
+    assert env.x == pytest.approx(min(env.L, x0 + moveby_radius(10)), abs=1e-3)
+
+
+def test_ppo_trains_with_moveby_controls_on_a_sites_profile():
+    pytest.importorskip("stable_baselines3")
+    from stable_baselines3 import PPO
+    md.apply_profile("sites_d20_t0")
+    env = make_env("moveby", hold=10, obs_mode="dict",
+                   obs_groups=["pos", "vel", "battery", "time", "prev", "crowd_n", "history", "heat_all_u",
+                               "heat_rescue_u"])
+    model = PPO("MultiInputPolicy", env, n_steps=32, batch_size=32, n_epochs=1, seed=0, verbose=0)
+    model.learn(64)
+    obs, _ = env.reset(seed=1)
+    a, _ = model.predict(obs, deterministic=True)
+    assert env.action_space.contains(a.astype(np.float32))
+
+
 def test_rl_policy_decides_only_every_hold_seconds():
     from rl_utils import RLPolicy
 
@@ -527,3 +594,19 @@ def test_rl_policy_in_dict_mode_never_asks_the_env_for_the_privileged_state():
     for o in Model.seen:
         assert Model.observation_space.contains(o)
         assert not o["priv_maps"].any() and not o["priv_n"].any()            # zeros, never the true state
+
+
+def test_event_announce_carries_the_announcement_only_when_announced():
+    md.apply_profile("sites_d20_t0")                                 # unannounced
+    env = UAVEnv(obs_groups=["pos", "event_countdown", "event_announce"])
+    env.reset(seed=2)
+    assert env.event_announce() == [0.0] * 6 and env.event_countdown() == 1.0
+    md.apply_profile("sites_d20_t0_ann")                             # announced: from A, to B, share, duration
+    env = UAVEnv(obs_groups=["pos", "event_countdown", "event_announce"])
+    obs, _ = env.reset(seed=2)
+    a = env.event_announce()
+    assert a[:4] == pytest.approx([env.sc["site_x"][0] / env.L, env.sc["site_y"][0] / env.L,
+                                   env.sc["site_x"][1] / env.L, env.sc["site_y"][1] / env.L])
+    assert a[4] == pytest.approx(env.sc["event_share"]) and a[5] == 0.0
+    assert np.hypot(a[2] - a[0], a[3] - a[1]) * env.L == pytest.approx(2000.0, abs=1e-6)
+    assert obs.shape == (3 + 1 + 6,) and 0.0 <= env.event_countdown() < 1.0

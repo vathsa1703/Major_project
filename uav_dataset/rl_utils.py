@@ -7,6 +7,11 @@ Two ways to steer, because they are not equally easy to learn:
                           also the power). The drone flies there at full speed and stays when it arrives, so staying
                           over the crowd needs no special effort. (Velocity controls made PPO find the crowd and then
                           drift away: see CLAUDE.md.)
+  moveby / movebyz / movebyzp = RELATIVE waypoint controls ("move this far in this direction"): the action is an offset
+                          from where the drone is when it decides, up to moveby_radius_m per decision (default: as far
+                          as it can fly in one held decision). Staying is simply "move 0". The target is fixed at the
+                          moment of the decision, so the drone stops there instead of drifting. Added for G5 because
+                          with goto the trained agent reached the best spot and then flew past it (book 8.8).
 Unused controls are held: altitude at the start height and full power.
 """
 import json
@@ -19,13 +24,44 @@ from gymnasium import spaces
 import make_dataset as md
 from uav_env import UAVEnv
 
-CONTROLS = {"xy": 2, "xyz": 3, "xyzp": 4, "goto": 2, "gotoz": 3, "gotozp": 4}
+CONTROLS = {"xy": 2, "xyz": 3, "xyzp": 4, "goto": 2, "gotoz": 3, "gotozp": 4, "moveby": 2, "movebyz": 3, "movebyzp": 4}
 WAYPOINT = ("goto", "gotoz", "gotozp")
+MOVEBY = {"moveby": "goto", "movebyz": "gotoz", "movebyzp": "gotozp"}     # relative control -> its absolute twin
+
+
+def moveby_radius(hold):
+    """Largest horizontal offset (m) of one move-by decision: rl.moveby_radius_m, or by default the distance the drone
+    covers at full speed while the decision is held (v_max x hold seconds)."""
+    r = md.CFG["rl"].get("moveby_radius_m")
+    return float(r) if r else md.CFG["uav"]["v_max_mps"] * md.CFG["energy"]["dt_s"] * max(1, int(hold))
+
+
+def moveby_to_goto(a, controls, env, hold=1):
+    """A move-by action (offset from the drone's position NOW) -> the equivalent absolute goto action (a spot on the
+    map, in [-1, 1]), so the target can be fixed at the moment of the decision. Offsets beyond the map are clipped."""
+    a = np.asarray(a, dtype=np.float64).ravel()
+    k = CONTROLS[controls]
+    assert controls in MOVEBY and len(a) == k, f"controls={controls!r} needs {k} numbers, got {len(a)}"
+    e, u = env.unwrapped if hasattr(env, "unwrapped") else env, md.CFG["uav"]
+    r = moveby_radius(hold)
+    tx = np.clip(e.x + np.clip(a[0], -1, 1) * r, 0.0, e.L)
+    ty = np.clip(e.y + np.clip(a[1], -1, 1) * r, 0.0, e.L)
+    g = [2 * tx / e.L - 1, 2 * ty / e.L - 1]
+    if k >= 3:                                                  # altitude: offset of up to vz_max x hold seconds
+        th = np.clip(e.h + np.clip(a[2], -1, 1) * u["vz_max_mps"] * md.CFG["energy"]["dt_s"] * max(1, int(hold)),
+                     u["h_min_m"], u["h_max_m"])
+        g.append(2 * (th - u["h_min_m"]) / (u["h_max_m"] - u["h_min_m"]) - 1)
+    if k >= 4:
+        g.append(a[3])
+    return np.array(g)
 
 
 def expand_action(a, controls, env=None):
     """Agent action (2, 3 or 4 numbers) -> the env's 4 numbers [vx, vy, vz, power].
-    Waypoint controls need `env` (to know where the drone is now)."""
+    Waypoint controls need `env` (to know where the drone is now). A move-by action passed here is anchored at the
+    current position (one second's decision); held decisions anchor it once, in MoveByWrapper or RLPolicy."""
+    if controls in MOVEBY:
+        return expand_action(moveby_to_goto(a, controls, env), MOVEBY[controls], env)
     a = np.asarray(a, dtype=np.float64).ravel()
     k = CONTROLS[controls]
     assert len(a) == k, f"controls={controls!r} needs {k} numbers, got {len(a)}"
@@ -80,15 +116,30 @@ class HoldWrapper(gym.Wrapper):
         return obs, total, terminated, truncated, info
 
 
+class MoveByWrapper(gym.Wrapper):
+    """Outermost wrapper for move-by controls: once per decision it turns the relative action into the absolute spot
+    (anchored at where the drone is when it decides) and passes that goto action to the inner (held) env."""
+
+    def __init__(self, env, controls, hold=1):
+        super().__init__(env)
+        self.controls, self.hold = controls, hold
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(CONTROLS[controls],), dtype=np.float32)
+
+    def step(self, action):
+        return self.env.step(moveby_to_goto(action, self.controls, self.env, self.hold).astype(np.float32))
+
+
 def make_env(controls="xy", reward=None, scenario_seeds=None, battery_wh=None, hold=1, obs_groups=None,
              obs_mode="box", privileged=False):
     """A training/eval env. Call AFTER md.apply_profile(...): the env reads the config when it is created.
     hold = how many seconds the agent's choice is held (1 = it decides every second); it is also the spacing of the
     `history` observation group. obs_mode/privileged: see UAVEnv (privileged = critic-only true state, dict only)."""
+    inner = MOVEBY.get(controls, controls)
     env = ControlWrapper(UAVEnv(reward=reward, battery_wh=battery_wh, scenario_seeds=scenario_seeds,
                                 obs_groups=obs_groups, obs_mode=obs_mode, privileged=privileged,
-                                history_every=hold), controls)
-    return HoldWrapper(env, hold) if hold > 1 else env
+                                history_every=hold), inner)
+    env = HoldWrapper(env, hold) if hold > 1 else env
+    return MoveByWrapper(env, controls, hold) if controls in MOVEBY else env
 
 
 def train_seeds():
@@ -139,7 +190,9 @@ class RLPolicy:
     def act(self, env):
         if self.last is None or env.t % self.hold == 0:                  # decide every `hold` seconds
             self.last, _ = self.model.predict(self.observation(env), deterministic=True)
-        return expand_action(self.last, self.controls, env)
+            if self.controls in MOVEBY:                                  # anchor the move at the decision time
+                self.last = moveby_to_goto(self.last, self.controls, env, self.hold)
+        return expand_action(self.last, MOVEBY.get(self.controls, self.controls), env)
 
 
 def load_policy(model_path, controls=None, hold=None):

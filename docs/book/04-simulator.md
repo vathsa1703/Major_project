@@ -160,7 +160,27 @@ level (0, 10, 20, 30 dBm) for the users at t = 0, with obstacles and the average
 spectral efficiency, fairness, rescue outage, OMA coverage and sum rate, and the hover energy per step. Chapter 5 has the table
 layout.
 
-## 4.9 What the simulator does not model yet
+## 4.9 A simulated quadcopter that really flies (roadmap Stage 5, 2026-10-23)
+**Plain words.** Until now the drone was a point that moves in straight lines. Now it can be a **quadcopter**: it has mass,
+it tilts to accelerate (at most 30°), its motors react with a small delay, it is pushed by **wind and gusts**, and it is flown
+by an **autopilot** built like real ones (ArduPilot's GUIDED mode / PX4 offboard): the pilot (B6, B7, the AI...) says "fly
+this way" every second and the autopilot turns that into tilt and motor thrust. Every pilot and the AI fly it unchanged.
+Off by default (`quad.enabled: false`), so all earlier results are bit-for-bit the same (tests). Parameters are in
+`config.yaml` → `quad:`; most are engineering assumptions, some autopilot defaults are quoted from memory (marked NOT VERIFIED).
+
+**3D view.** A new dashboard page "3D flight" draws the flight in the browser (three.js): ground grid, buildings as blocks
+(heights for display only), survivors green/red, the quadcopter tilting with its real attitude, its trail, play/pause, a time
+slider and a live display (time, people served, height, speed, tilt, battery, wind).
+
+**Sim-to-sim check (5 scenarios per row, so rough):** coverage on the quadcopter is 0.003 to 0.012 lower than in the point
+game; 5 m/s wind with gusts changes it by at most 0.002 (the autopilot holds its spot within about a metre). Pilots built for
+the point game overshoot their target on a real-feeling drone unless they brake in time (with the G5 acceleration limit they
+do: median 1.8 m off target). Energy on the quadcopter is *not* trustworthy yet: the Zeng formula makes wobbling and wind look
+cheaper than hovering. **So our results hold on a realistic drone; its battery numbers need more work.** Not validated against
+a real drone or ArduPilot/PX4 software-in-the-loop. 26 tests. Reproduce: `python sim2sim_exp.py run`, `report`; 3D page:
+`streamlit run uav_dataset/dashboard.py` → "3D flight".
+
+## 4.10 What the simulator does not model yet
 Fading in the dataset, building heights, terrain, wind, GPS error, control delays, real battery behaviour, the drone's own
 backhaul link, interference from other cells, more than one drone, imperfect SIC, bit-error rate, NOMA settings as decisions,
 and not knowing where people are. All are in the roadmap (Chapter 11).

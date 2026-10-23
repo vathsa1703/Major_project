@@ -59,6 +59,9 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-51 | 10-21 | Clairvoyant test: no room for anticipation in today's moving-crowd scenarios (+0.002 < 0.02); redesign scenarios before G5 | Pre-registered rule |
 | D-52 | 10-22 | Scenario redesign 'competing sites', PRE-REGISTERED before any run: design grid, baselines, pass mark, fresh-seed confirmation, negative control | Owner + reviewer |
 | D-53 | 10-22 | Phases 1-2 of D-52: battery alone gives no room (B8 = B7); 7 of 9 competing-sites designs pass the 0.02 room test; go on to B6-forecast and fresh-seed confirmation | Pre-registered rule |
+| D-54 | 10-23 | The AI may use the announced schedule; it gets the same announcement contents as the forecasting pilot B6fc | Owner |
+| D-55 | 10-23 | G5 rules pre-registered before any training: cells, controls, budget, bar, pass mark, NOMA vs OMA report | Owner + Claude |
+| D-56 | 10-23 | After G5 round 1 (AI lost): drop round 2; adopt the anticipation rule and the value-of-location-information study as the contributions; try a hybrid timing AI; OpenStreetMap as demo/final test; stay focused (no general drone platform) | Owner |
 
 ---
 
@@ -362,4 +365,43 @@ AI (as predicted). Phase 2: a pilot that knows the future beats the best simple 
 (Chapter 7.12); the two 1.0 km designs with a gradual switch fail; 1.5 km with a 3-minute switch passes only just (+0.0201),
 reported as borderline. As pre-registered, nothing counts yet: B6-forecast is added and the passing designs are re-measured on
 fresh scenarios before any AI is trained on them.
+
+### D-54 The AI may use the announced schedule
+In the competing-sites scenarios an operator message can announce the event ("from t0, about m people will be taken from A
+to the shelter at B over tau"). The owner decided the AI may use it: it is a message a real base station would receive, so
+it is a raw measurement under D-24. For a fair contest the AI gets **the same contents** the forecasting pilot B6fc uses:
+the countdown to the event (`event_countdown`) and the rest of the message (`event_announce`: where from, where to, the share
+that moves and the switch duration). Training cells: `sites_d20_t0_ann`, `sites_d20_t60_ann`. Both groups are opt-in, so old
+models and results are unchanged.
+
+### D-55 G5 rules, pre-registered on 2026-10-23 before any training
+- **Cells:** the two primary cells confirmed on fresh seeds (D-52 phases 3-4): sites 2.0 km apart, switch sudden (`t0`) or
+  over 60 s (`t60`), announced. Owner's G5 settings (adaptive NOMA, SIC 0.05, rescue first, acceleration limit 4 m/s^2).
+- **Agent:** E0's design (PPO, Dict observation with uncapped maps, crowd size, own history, CNN; fresh training scenarios
+  10,000-19,999; gamma 0.95; decisions held 10 s) plus the announcement groups (D-54).
+- **Round 1 (choose the steering):** per cell, `goto` vs the new `moveby` ("move this far"; 0 = stay), 2 training seeds each =
+  8 runs of 150,000 decisions (the E0 budget; the sites scenarios train at about 10 decisions/s on the laptop, so 300,000 would
+  not fit a Kaggle session). The better steering per cell is chosen on the 20 validation scenarios (100-119).
+- **Round 2 (final):** the chosen version, 5 training seeds per cell.
+- **Bar:** per scenario, the best of B6, B7, B8, B6fc (announced). If the departure-time pilot B6dep is built and tested before
+  round 2 is evaluated, it joins the bar (a stronger bar can only make passing harder).
+- **Pass mark (G5):** the AI's 5-seed mean beats the bar on the validation scenarios, paired, Holm-corrected over the two cells,
+  in at least one cell. Also reported: the share of the clairvoyant pilot's room the AI captures, and NOMA vs OMA for the AI
+  (same AI, `oma_opt`). Negative control: on a no-room cell (`sites_d10_t0`, and `hard`) the AI must not beat the bar; if it
+  does, look for a bug. The test scenarios (120-139) are read once, at the end.
+- **Compute:** Kaggle (owner's account, via the Kaggle command-line tool), two notebooks in parallel, one per cell.
+
+### D-56 After G5 round 1: what the project focuses on
+G5 round 1 showed every full AI below the bar (8.9). The owner decided to finish the project with:
+1. **The anticipation rule** as the headline contribution: one number from distance, drone speed, switch time and mission
+   length that predicts when anticipation (and so AI) can beat greedy re-planning, fitted on the 9 designs and tested on 8
+   new ones with predictions written down first; plus a three-part breakdown of any AI's shortfall (foresight, information,
+   learning). A sixth review round found no published equivalent in a quick search (to be checked in the literature review).
+2. **How much location information is enough:** the share, accuracy and age of phone position reports a planner needs to reach
+   98% of full-information coverage (the drone *is* the network after a disaster, so phones that attach can report).
+3. **A hybrid timing AI:** the search pilot decides where (x, y, altitude); the AI learns only when to leave for the announced
+   site, the one decision where the room is. Disclosed as a hybrid.
+4. Round 2 of the full AI is dropped; OpenStreetMap buildings are a demo and a final test of the rule, not the headline; the
+   general "test any drone" platform (a friend's crop-spraying drone gave the idea) stays out of scope (backlog, business
+   track); "connect and locate survivors from their phones" goes into future work and the business track.
 

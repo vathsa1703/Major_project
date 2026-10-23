@@ -101,6 +101,10 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
   G5 settings inside; old results bit-exact). B8 battery rule = B7 (battery alone: no room). Future-knowing pilot minus
   best simple pilot: +0.025..+0.108, 7/9 designs pass 0.02 (d15_t180 borderline). NEXT: B6-forecast + fresh-seed
   confirmation (D-52 phase 3-4), then G5 training on passing designs. Plain-English summary: docs/summary/.
+  CONFIRMED (book 7.13): 5/9 designs on fresh seeds; B6fc forecaster leaves too early. G5 ROUND 1 (book 8.9, Kaggle):
+  all 8 full-AI agents below the bar (best 0.680 vs 0.756/0.753) and below B6. Stage 5 quadcopter + 3D page built (4.9):
+  coverage gap -0.003..-0.012, wind <= 0.002. D-56: contributions = anticipation rule + value of location info; hybrid
+  timing AI; round 2 dropped. Kaggle CLI set up (owner's key in the user folder; never read it).
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.
