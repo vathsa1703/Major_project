@@ -1,6 +1,7 @@
 """Baseline controllers B0-B5, plus B6 (B3 with altitude search), B7 (B6's targets, but circling at the
 minimum-power speed instead of hovering; plan step 5) and B8 (B6's targets; hovers while the battery would last
-hovering to the end, circles like B7 otherwise; D-52).
+hovering to the end, circles like B7 otherwise; D-52) and B6fc (B6 scoring its candidates on a forecast of the active
+users at the drone's arrival: velocity extrapolation, plus the announced event when there is one; D-52 phase 3).
 Each one drives the SAME UAVEnv through env.step(), so comparisons are fair.
 
     policy = make_policy("B2")
@@ -13,6 +14,8 @@ The information ladder B3obs -> B3obsU -> B3obsUO -> B3 runs B3's exact search w
 capped maps; uncapped maps; plus obstacles; full truth), to tell whether the agent is limited by what it can see.
 All settings are in config.yaml under `baselines:`.
 """
+import hashlib
+
 import numpy as np
 
 import make_dataset as md
@@ -330,17 +333,26 @@ class B6GridAltitude(Policy):
         """The 'stay' candidate, also the reference point for ties: B6 uses where the drone is now."""
         return env.x, env.y, env.h
 
-    def plan(self, env):
+    def candidates(self, env):
+        """B6's candidates: the grid at every altitude level (x-major, like oracle_nodes), then the 'stay' spot."""
         X, Y = _grid(env)
         hx, hy, hh = self.here(env)
         levels = np.array(BCFG["altitude_levels_m"], dtype=float)
         CX, CH = np.repeat(X, len(levels)), np.tile(levels, len(X))
         CY = np.repeat(Y, len(levels))
-        CX, CY, CH = np.append(CX, hx), np.append(CY, hy), np.append(CH, hh)
-        cov = env.evaluate(CX, CY, CH, env.p_max_w * self.power)
+        return np.append(CX, hx), np.append(CY, hy), np.append(CH, hh)
+
+    def pick(self, env, cov, CX, CY, CH):
+        """Index of the best candidate; ties: the one closest to the 'stay' spot."""
+        hx, hy, hh = self.here(env)
         best = np.flatnonzero(cov >= cov.max() - 1e-12)
         d = np.sqrt((CX[best] - hx) ** 2 + (CY[best] - hy) ** 2 + (CH[best] - hh) ** 2)
-        j = best[np.argmin(d)]                                           # ties: the closest one
+        return best[np.argmin(d)]                                        # ties: the closest one
+
+    def plan(self, env):
+        CX, CY, CH = self.candidates(env)
+        cov = env.evaluate(CX, CY, CH, env.p_max_w * self.power)
+        j = self.pick(env, cov, CX, CY, CH)
         self.target = (CX[j], CY[j], CH[j])
 
 
@@ -433,6 +445,213 @@ class B8BatteryAware(B7Loiter):
         return go_to(env, *self.target, self.power)
 
 
+# ---------------------------------------------------------------- B6fc: the forecasting greedy pilot (D-52 phase 3)
+def flight_steps(env, X, Y, H, max_steps):
+    """Whole steps go_to needs to bring the drone from its CURRENT state (position and velocity) to each candidate
+    (X, Y, H): env.step's kinematics (speed limits, acceleration limit, map and altitude clipping) driven by go_to's
+    commands (braking included), vectorised over the candidates. Arrived = within b6fc.arrive_tol_m of the target
+    horizontally and vertically. inf if not arrived within max_steps. Pure: reads only the drone's own state."""
+    u, dt, L = env.uav, env.dt, env.L
+    vmax, vzmax, a_max = u["v_max_mps"], u["vz_max_mps"], u.get("a_max_mps2")
+    tol = float(md.CFG["b6fc"]["arrive_tol_m"])
+    X, Y, H = (np.asarray(a, dtype=float) for a in (X, Y, H))
+    n = len(X)
+    x, y, h = np.full(n, env.x), np.full(n, env.y), np.full(n, env.h)
+    vx, vy, vz = np.full(n, env.vx), np.full(n, env.vy), np.full(n, env.vz)
+    arr = np.full(n, np.inf)
+    for k in range(int(max_steps) + 1):
+        dx, dy, dh = X - x, Y - y, H - h
+        dist = np.hypot(dx, dy)
+        arr[np.isinf(arr) & (dist <= tol) & (np.abs(dh) <= tol)] = k
+        if k == max_steps or not np.isinf(arr).any():
+            break
+        if a_max is None:                                   # go_to, old model
+            cx, cy = dx / (vmax * dt), dy / (vmax * dt)
+            nrm = np.hypot(cx, cy)
+            sc = np.where(nrm > 1.0, 1.0 / np.maximum(nrm, 1e-300), 1.0)
+            cx, cy = cx * sc, cy * sc
+            cz = np.clip(dh / (vzmax * dt), -1.0, 1.0)
+        else:                                               # go_to with braking
+            s = np.minimum(np.minimum(vmax, dist / dt), brake_speed(dist, a_max, dt))
+            safe = np.where(dist > 0, dist, 1.0)
+            cx, cy = np.where(dist > 0, dx / safe * s / vmax, 0.0), np.where(dist > 0, dy / safe * s / vmax, 0.0)
+            sz = np.minimum(np.minimum(vzmax, np.abs(dh) / dt), brake_speed(np.abs(dh), u["az_max_mps2"], dt))
+            cz = np.sign(dh) * sz / vzmax
+        cx, cy, cz = np.clip(cx, -1, 1), np.clip(cy, -1, 1), np.clip(cz, -1, 1)          # env.step from here
+        hx, hy = cx * vmax, cy * vmax
+        nrm = np.hypot(hx, hy)
+        sc = np.where(nrm > vmax, vmax / np.maximum(nrm, 1e-300), 1.0)
+        hx, hy, hz = hx * sc, hy * sc, cz * vzmax
+        if a_max is not None:
+            ddx, ddy = hx - vx, hy - vy
+            nrm = np.hypot(ddx, ddy)
+            sc = np.where(nrm > a_max * dt, a_max * dt / np.maximum(nrm, 1e-300), 1.0)
+            hx, hy = vx + ddx * sc, vy + ddy * sc
+            az = u["az_max_mps2"] * dt
+            hz = vz + np.clip(hz - vz, -az, az)
+        nx, ny = np.clip(x + hx * dt, 0, L), np.clip(y + hy * dt, 0, L)
+        nh = np.clip(h + hz * dt, u["h_min_m"], u["h_max_m"])
+        vx, vy, vz = (nx - x) / dt, (ny - y) / dt, (nh - h) / dt
+        x, y, h = nx, ny, nh
+    return arr
+
+
+FC_MEMO = None      # optional {key: per-lattice-node coverage} shared by B6fc runs (sites_exp sets it; None = off)
+
+
+class B6Forecast(B6GridAltitude):
+    """B6fc (D-52 phase 3): B6 that scores its candidates by where the active users WILL be when the drone gets there.
+    Every K steps, for every B6 candidate (grid x altitude levels + 'stay'):
+      arrival a = flight_steps (go_to at v_max from the drone's current position and velocity, braking included);
+      score = mean coverage over the forecast times ceil5(t + a) + {0, 10, ..., 60} s (inside the episode; config
+              `b6fc:`), each computed with env.evaluate's physics (UAVEnv.evaluate_users: same channel, access scheme,
+              power, bandwidth) on a FORECAST of the active users.
+    Pick the best; ties (1e-12) -> B6's own choice if it is among the best, else the closest to the drone (B6's rule).
+    The forecast uses ONLY:
+      - the drone's own state (position, velocity), like B6;
+      - the users active NOW (positions, min rates, rescue flags), exactly what B6 already uses;
+      - their velocities from the last frame: (position now - position 1 s ago) for users active now and 1 s ago
+        (0 otherwise, and 0 at t = 0); forecast position = position now + velocity x lead time, clipped to the map;
+      - ONLY when the scenario's event is announced (env.sc['announced'], competing sites): the announcement, i.e. the
+        event time t0, the duration tau, the number of people that move m = round(share x n active) (md.n_movers),
+        and the two sites' centres and radii (where they leave, where they go). This is what an operator message would
+        carry ("from t0, about m people will be taken from the school at A to the shelter at B over tau minutes").
+        Forecast: by time t the announced linear schedule has switched min(m, floor((t - t0) m / tau) + 1) movers
+        (all m if tau = 0); the ones still to switch after now are taken from the users active now inside A's disc
+        (in user order: the pilot does NOT know which individuals move) and placed at B at their position relative
+        to A scaled by r_B / r_A (they keep their class). It never reads the true movers, the true arrival positions
+        or any future position or mask.
+    It does NOT read the battery (it hovers like B6). Without an event and with still crowds every forecast equals the
+    present, so B6fc is exactly B6 (test)."""
+    name = "B6fc"
+
+    def reset(self, env):
+        super().reset(env)
+        c = md.CFG["b6fc"]
+        self.window, self.sample, self.quantum = int(c["window_s"]), int(c["sample_s"]), int(c["quantum_s"])
+
+    def announced(self, env):
+        sc = env.sc
+        return bool(sc.get("announced", False)) and sc.get("event_t0_s") is not None
+
+    def snapshot(self, env):
+        """Everything the forecast may use, read once at the decision time (present and last frame only)."""
+        t, dt = env.t, env.dt
+        m = env.active_mask()
+        xy = env.user_xy(t)
+        prev = env.user_xy(t - 1) if t > 0 else xy
+        was = np.ones(len(xy), bool) if (m is None or t == 0) else env.active_mask(t - 1)
+        keep = np.ones(len(xy), bool) if m is None else m
+        v = np.where(was[keep][:, None], (xy[keep] - prev[keep]) / dt, 0.0)
+        snap = dict(t=t, xy=xy[keep], v=v, mr=env.min_rate[keep], rs=env.rescue[keep], moved=None)
+        if self.announced(env):
+            sc = env.sc
+            cA, cB = (np.array([sc["site_x"][i], sc["site_y"][i]]) for i in (0, 1))
+            rA, rB = (float(sc["site_radius_m"][i]) for i in (0, 1))
+            inA = np.flatnonzero(np.hypot(*(snap["xy"] - cA).T) <= rA)
+            snap.update(t0=float(sc["event_t0_s"]), tau=float(sc["tau_s"]), m=md.n_movers(sc), inA=inA,
+                        dest=cB + (snap["xy"][inA] - cA) * (rB / rA))
+        return snap
+
+    @staticmethod
+    def switched(s, time_s):
+        """Movers switched by time_s on the announced linear schedule."""
+        if time_s < s["t0"]:
+            return 0
+        if s["tau"] <= 0:
+            return s["m"]
+        return min(s["m"], int(np.floor((time_s - s["t0"]) * s["m"] / s["tau"])) + 1)
+
+    def forecast(self, env, s, tt):
+        """(xy, min_rate, rescue) of the forecast active users at time index tt >= now."""
+        lead = (tt - s["t"]) * env.dt
+        xy = np.clip(s["xy"] + s["v"] * lead, 0.0, env.L) if lead > 0 else s["xy"]
+        if "t0" in s:
+            k = min(len(s["inA"]), self.switched(s, tt * env.dt) - self.switched(s, s["t"] * env.dt))
+            if k > 0:
+                xy = xy.copy()
+                xy[s["inA"][:k]] = s["dest"][:k]
+        return xy, s["mr"], s["rs"]
+
+    def forecast_cov(self, env, s, tt, idx, CX, CY, CH, p_w):
+        """Coverage of candidates idx at forecast time tt (memoised per forecast user set when FC_MEMO is on)."""
+        xy, mr, rs = self.forecast(env, s, tt)
+        n_lat = len(CX) - 1
+        memo = FC_MEMO if (FC_MEMO is not None and (env.access in md.QOS_SCHEMES or env.sc["pairing"] == "extreme")) \
+            else None
+        if memo is None:
+            return env.evaluate_users(xy, mr, rs, CX[idx], CY[idx], CH[idx], p_w, tt)
+        blob = b"".join(np.ascontiguousarray(a).tobytes() for a in (xy, mr, rs, env.boxes, CX[:-1], CY[:-1], CH[:-1]))
+        blob += repr((int(tt), p_w, env.access, env.sic_eps, env.rescue_first, env.sc["bandwidth_hz"],
+                      env.sc["pairing"], env.scenario_seed)).encode()
+        key = hashlib.sha1(blob).hexdigest()
+        row = memo.get(key)
+        if row is None:
+            row = memo[key] = np.full(n_lat, np.nan)
+        out = np.empty(len(idx))
+        lat = idx < n_lat
+        need = idx[lat][np.isnan(row[idx[lat]])]
+        if len(need):
+            row[need] = env.evaluate_users(xy, mr, rs, CX[need], CY[need], CH[need], p_w, tt)
+        out[lat] = row[idx[lat]]
+        if (~lat).any():
+            j = idx[~lat]
+            out[~lat] = env.evaluate_users(xy, mr, rs, CX[j], CY[j], CH[j], p_w, tt)
+        return out
+
+    def _mean_cov(self, env, s, times, valid, CX, CY, CH, p_w):
+        """Mean forecast coverage of each candidate over its valid sample times (-inf if it has none)."""
+        acc, cnt = np.zeros(len(CX)), valid.sum(axis=1)
+        tv = np.where(valid, times, np.inf)
+        for tt in np.unique(tv[valid]):
+            idx = np.flatnonzero((tv == tt).any(axis=1))
+            acc[idx] += self.forecast_cov(env, s, int(tt), idx, CX, CY, CH, p_w)
+        return np.where(cnt > 0, acc / np.maximum(cnt, 1), -np.inf)
+
+    def scores(self, env, CX, CY, CH, keep=()):
+        """Forecast score of every candidate (-inf if it cannot be reached before the end).
+        With b6fc.screen_top = K (ENGINEERING CHOICE, for run time): stage 1 scores every candidate at ONE forecast
+        time (the middle sample of its window, or its last sample inside the episode); only the K best of stage 1
+        plus the candidates in `keep` (B6's choice, 'stay') get the full window score, the others -inf.
+        screen_top null = the full rule for every candidate."""
+        p_w = env.p_max_w * self.power
+        s = self.snapshot(env)
+        arr = flight_steps(env, CX, CY, CH, env.T - env.t)
+        q = self.quantum
+        start = np.full(len(CX), np.inf)
+        ok = np.isfinite(arr)
+        start[ok] = np.ceil((env.t + arr[ok]) / q) * q
+        offs = np.arange(0, self.window + 1, self.sample)
+        times = start[:, None] + offs[None, :]
+        valid = times < env.T
+        top = md.CFG["b6fc"].get("screen_top")
+        if top and top < len(CX):
+            cnt = valid.sum(axis=1)
+            col = np.minimum(len(offs) // 2, np.maximum(cnt - 1, 0))
+            rows = np.arange(len(CX))
+            one = np.zeros_like(valid)
+            one[rows, col] = cnt > 0
+            s1 = self._mean_cov(env, s, times, one, CX, CY, CH, p_w)
+            kept = np.zeros(len(CX), bool)
+            kept[np.argsort(-s1, kind="stable")[:top]] = True
+            kept[list(keep)] = True
+            valid &= kept[:, None]
+        return self._mean_cov(env, s, times, valid, CX, CY, CH, p_w)
+
+    def plan(self, env):
+        super().plan(env)                                  # B6's own choice (the tie-break)
+        b6 = self.target
+        CX, CY, CH = self.candidates(env)
+        j6 = int(np.flatnonzero((CX == b6[0]) & (CY == b6[1]) & (CH == b6[2]))[0])
+        sc = self.scores(env, CX, CY, CH, keep=(j6, len(CX) - 1))
+        if not np.isfinite(sc).any():
+            return
+        if sc[j6] >= sc.max() - 1e-12:                      # tie (or best): B6's choice
+            return
+        j = self.pick(env, sc, CX, CY, CH)
+        self.target = (CX[j], CY[j], CH[j])
+
+
 class B4PSO(Policy):
     """B4: particle swarm over (x, y, altitude, power) every K steps.
     Objective = the env's v2 reward at the candidate."""
@@ -497,7 +716,7 @@ class B5EnergyAware(Policy):
 
 
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
-            "B6": B6GridAltitude, "B7": B7Loiter, "B8": B8BatteryAware,
+            "B6": B6GridAltitude, "B7": B7Loiter, "B8": B8BatteryAware, "B6fc": B6Forecast,
             "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles,
             "B3obsN": B3ObsN, "B3obsUN": B3ObsUncappedN}
 

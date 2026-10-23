@@ -172,6 +172,19 @@ baselines:
   # B3obs / B3obsU / B3obsUO (information ladder): B3's search, but scored on a pseudo-crowd rebuilt from the maps.
   obs_pseudo_users: 500         # ENGINEERING ASSUMPTION: crowd size they assume (mean of n_users_choices; must be even)
 
+# B6fc, the forecasting greedy pilot (D-52 phase 3; baselines.B6Forecast). Every K steps it scores B6's candidates by
+# the mean coverage over [arrival, arrival + window_s] for a FORECAST of the active users (velocity extrapolation from the
+# last frame; in announced competing-sites cells also the announced A -> B move). Used by no other pilot and no default.
+b6fc:
+  window_s: 60                  # D-52 phase 3: score window after arrival (seconds)
+  sample_s: 10                  # ENGINEERING CHOICE: forecast samples inside the window (0, 10, ..., 60 s after arrival)
+  quantum_s: 5                  # ENGINEERING CHOICE: arrival rounded UP to the next multiple of this (absolute time), so
+                                # candidates share forecast times (the oracle's tensor uses the same 5 s grid)
+  arrive_tol_m: 0.5             # arrived = within this distance of the target, horizontally and vertically
+  screen_top: null              # null = full rule. K = ENGINEERING CHOICE for run time: score every candidate at one
+                                # forecast time (mid-window) first, then the full window only for the K best (+ B6's
+                                # choice and 'stay'); sites_exp phase 4 sets it (SCREEN_TOP) and reports the agreement
+
 # Clairvoyant oracle (book 14.6 step 3, oracle.py): how much could ANTICIPATION add over the best myopic pilot B6?
 # It knows the crowd's future and plans over B6's own candidates (grid_n x grid_n x altitude_levels_m + the start spot).
 # Decisions every baselines.replan_every_steps seconds, like B6. Measurement only: never imported by the rl_* code.
