@@ -44,7 +44,7 @@ CFG = md.CFG
 # The default observation is built from these named groups, always in this order (scalars first, then the two maps).
 OBS_GROUPS = ("pos", "vel", "battery", "time", "prev", "heat_all", "heat_rescue")
 # Every group that exists, in canonical order (OBS_GROUPS keep their relative order, so the default is unchanged).
-ALL_GROUPS = ("pos", "vel", "battery", "time", "prev", "crowd_n", "history", "event_countdown",
+ALL_GROUPS = ("pos", "vel", "battery", "time", "prev", "crowd_n", "history", "event_countdown", "event_announce",
               "heat_all", "heat_all_u", "heat_rescue", "heat_rescue_u")
 MAP_GROUPS = ("heat_all", "heat_all_u", "heat_rescue", "heat_rescue_u")
 # Critic-only keys of the Dict observation (true state). Any key starting with "priv" is privileged.
@@ -106,6 +106,7 @@ class UAVEnv(gym.Env):
     @staticmethod
     def group_sizes(grid):
         return {"pos": 3, "vel": 3, "battery": 1, "time": 1, "prev": 3, "crowd_n": 1, "event_countdown": 1,
+                "event_announce": 6,
                 "history": 3 * CFG["env"]["history_len"], **{g: grid**2 for g in MAP_GROUPS}}
 
     @staticmethod
@@ -191,6 +192,16 @@ class UAVEnv(gym.Env):
         if t0 is None or not self.sc.get("announced", False):
             return 1.0
         return float(np.clip((t0 - self.t * self.dt) / (self.T * self.dt), 0.0, 1.0))
+
+    def event_announce(self):
+        """The rest of the announcement message (owner's decision D-54: the AI may use it, like B6fc): where people
+        move from (site A) and to (site B) as x/L, y/L, the share that moves, and the switch duration / episode
+        length. All zeros when nothing is announced (the countdown then reads 1)."""
+        if self.sc.get("event_t0_s") is None or not self.sc.get("announced", False):
+            return [0.0] * 6
+        T = self.T * self.dt
+        return [self.sc["site_x"][0] / self.L, self.sc["site_y"][0] / self.L, self.sc["site_x"][1] / self.L,
+                self.sc["site_y"][1] / self.L, float(self.sc["event_share"]), float(self.sc["tau_s"]) / T]
 
     def evaluate(self, X, Y, H, p_w, t=None):
         """Coverage the drone WOULD get at each candidate position (X, Y, H arrays) with transmit power p_w (W),
@@ -361,6 +372,8 @@ class UAVEnv(gym.Env):
             return [self.crowd_n()]
         if g == "event_countdown":
             return [self.event_countdown()]
+        if g == "event_announce":
+            return self.event_announce()
         return self._history(every)                                    # "history"
 
     def occupancy(self):

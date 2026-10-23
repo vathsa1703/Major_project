@@ -594,3 +594,19 @@ def test_rl_policy_in_dict_mode_never_asks_the_env_for_the_privileged_state():
     for o in Model.seen:
         assert Model.observation_space.contains(o)
         assert not o["priv_maps"].any() and not o["priv_n"].any()            # zeros, never the true state
+
+
+def test_event_announce_carries_the_announcement_only_when_announced():
+    md.apply_profile("sites_d20_t0")                                 # unannounced
+    env = UAVEnv(obs_groups=["pos", "event_countdown", "event_announce"])
+    env.reset(seed=2)
+    assert env.event_announce() == [0.0] * 6 and env.event_countdown() == 1.0
+    md.apply_profile("sites_d20_t0_ann")                             # announced: from A, to B, share, duration
+    env = UAVEnv(obs_groups=["pos", "event_countdown", "event_announce"])
+    obs, _ = env.reset(seed=2)
+    a = env.event_announce()
+    assert a[:4] == pytest.approx([env.sc["site_x"][0] / env.L, env.sc["site_y"][0] / env.L,
+                                   env.sc["site_x"][1] / env.L, env.sc["site_y"][1] / env.L])
+    assert a[4] == pytest.approx(env.sc["event_share"]) and a[5] == 0.0
+    assert np.hypot(a[2] - a[0], a[3] - a[1]) * env.L == pytest.approx(2000.0, abs=1e-6)
+    assert obs.shape == (3 + 1 + 6,) and 0.0 <= env.event_countdown() < 1.0

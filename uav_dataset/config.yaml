@@ -241,6 +241,9 @@ profiles:
   sites_d20_t0: {<<: *sites, sites: {distance_m: 2000, tau_s: 0}}
   sites_d20_t60: {<<: *sites, sites: {distance_m: 2000, tau_s: 60}}
   sites_d20_t180: {<<: *sites, sites: {distance_m: 2000, tau_s: 180}}
+  # G5 training cells with the ANNOUNCED schedule (owner, D-54): the AI sees event_countdown + event_announce
+  sites_d20_t0_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 0, announced: true}}
+  sites_d20_t60_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 60, announced: true}}
 
 # Reinforcement learning (Gate G4). Train on the training seeds only; pick models on val; touch test once at the end.
 rl:

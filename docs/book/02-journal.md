@@ -464,3 +464,13 @@ owner asked why we compare the AI with programmed pilots and with a future-knowi
 were wasted (no: they are the "where AI does not help" half of the answer H2 asks for), and whether a bigger map would help
 (not by itself: thinking ahead pays only when distance and fast change come together).
 
+## 2026-10-23
+
+### 55. The AI goes to work where it can win
+Phases 3-4 of the redesign confirmed, on 20 fresh scenarios per design and against a forecasting pilot, that an AI has room in
+5 of 9 designs; a fifth review round found the forecasting pilot leaves too early and that a departure-time version narrows the
+room to the 2 km designs (+4 to +9 per 100). The owner weighed a NOMA-validation stage and a general "test any drone" tool
+(kept focused; the multi-use idea goes to the backlog and business track) and chose to train the AI where it is useful. Built:
+"move by" steering (0 = stay; the target is fixed when the AI decides), the announcement as AI inputs (D-54), and the G5 rules
+(D-55). The owner set up Kaggle access (the key file was placed by the owner; the assistant never saw it); training runs there.
+
