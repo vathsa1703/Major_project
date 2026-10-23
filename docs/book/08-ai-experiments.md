@@ -262,3 +262,29 @@ verdict changes). Reproduce: `python rl_train.py --algo PPO --obs_mode dict --ga
 exact settings are saved in each model's `config.json`); `python rl_eval.py --model <zip> --policies Random,B2,B3,B3obs,B3obsUN
 --split val`.
 
+## 8.9 G5 round 1: the AI on competing sites (2026-10-23)
+**Setup, fixed beforehand (D-55).** The two 2 km designs (sudden switch; over 1 minute), announced; the owner's G5 settings.
+The AI is E0's design plus the announcement as inputs (D-54: when, from where, to where, how many). Two steering versions:
+`goto` ("fly to this spot") and the new **`moveby`** ("move this far"; 0 = stay; the target is fixed at the decision, built to
+stop the "flies past the spot" fault). 2 training seeds each, 150,000 decisions per run (about 3.5 h), trained on **Kaggle**
+(two notebooks in parallel, the owner's account, the key file placed by the owner). Bar: per scenario the best of B6, B7, B8
+and the forecasting pilot.
+
+**Results (20 validation scenarios):**
+
+| Design | Bar (B6 / forecaster) | goto s0 | goto s1 | moveby s0 | moveby s1 | best AI vs bar |
+|---|---|---|---|---|---|---|
+| 2 km, sudden | 0.756 (0.711 / 0.748) | 0.673 | 0.680 | 0.671 | 0.669 | **-0.076 ± 0.015*** |
+| 2 km, over 1 min | 0.753 (0.721 / 0.748) | 0.673 | 0.680 | 0.616 | 0.629 | **-0.073 ± 0.012*** |
+
+**Every AI is clearly below the bar and also below plain B6** (by 0.03 to 0.10). The `moveby` steering did not help here
+(equal on the sudden design, worse on the 1-minute design). **NOMA vs OMA for the AI:** the same agents serve 0.08 to 0.13
+more people with adaptive NOMA than with tuned OMA (all significant; the agents were trained with NOMA, so their OMA runs are
+outside what they learned).
+
+**What it means.** The room exists (the future-knowing pilot gains up to +0.09 there), but an AI that has to learn *everything*
+(where to fly as well as when) from rough maps does not reach it with this budget: it does not even react as well as the
+search pilot. The room is mostly about **one decision: when to leave for the other site** (7.13). Round 2 of the full AI (5
+more seeds) was dropped as uninformative; the owner approved a **hybrid timing AI** instead (D-56: the search pilot chooses
+where; the AI chooses only when to leave), plus the "anticipation rule" and "value of location information" studies.
+Reproduce: Kaggle kernels `uav-g5-round1-t0/t60`, then `python g5_eval.py --profile sites_d20_t0_ann --models <folder> --out <dir>`.

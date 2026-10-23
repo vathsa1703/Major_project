@@ -61,6 +61,7 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-53 | 10-22 | Phases 1-2 of D-52: battery alone gives no room (B8 = B7); 7 of 9 competing-sites designs pass the 0.02 room test; go on to B6-forecast and fresh-seed confirmation | Pre-registered rule |
 | D-54 | 10-23 | The AI may use the announced schedule; it gets the same announcement contents as the forecasting pilot B6fc | Owner |
 | D-55 | 10-23 | G5 rules pre-registered before any training: cells, controls, budget, bar, pass mark, NOMA vs OMA report | Owner + Claude |
+| D-56 | 10-23 | After G5 round 1 (AI lost): drop round 2; adopt the anticipation rule and the value-of-location-information study as the contributions; try a hybrid timing AI; OpenStreetMap as demo/final test; stay focused (no general drone platform) | Owner |
 
 ---
 
@@ -389,4 +390,18 @@ models and results are unchanged.
   (same AI, `oma_opt`). Negative control: on a no-room cell (`sites_d10_t0`, and `hard`) the AI must not beat the bar; if it
   does, look for a bug. The test scenarios (120-139) are read once, at the end.
 - **Compute:** Kaggle (owner's account, via the Kaggle command-line tool), two notebooks in parallel, one per cell.
+
+### D-56 After G5 round 1: what the project focuses on
+G5 round 1 showed every full AI below the bar (8.9). The owner decided to finish the project with:
+1. **The anticipation rule** as the headline contribution: one number from distance, drone speed, switch time and mission
+   length that predicts when anticipation (and so AI) can beat greedy re-planning, fitted on the 9 designs and tested on 8
+   new ones with predictions written down first; plus a three-part breakdown of any AI's shortfall (foresight, information,
+   learning). A sixth review round found no published equivalent in a quick search (to be checked in the literature review).
+2. **How much location information is enough:** the share, accuracy and age of phone position reports a planner needs to reach
+   98% of full-information coverage (the drone *is* the network after a disaster, so phones that attach can report).
+3. **A hybrid timing AI:** the search pilot decides where (x, y, altitude); the AI learns only when to leave for the announced
+   site, the one decision where the room is. Disclosed as a hybrid.
+4. Round 2 of the full AI is dropped; OpenStreetMap buildings are a demo and a final test of the rule, not the headline; the
+   general "test any drone" platform (a friend's crop-spraying drone gave the idea) stays out of scope (backlog, business
+   track); "connect and locate survivors from their phones" goes into future work and the business track.
 
