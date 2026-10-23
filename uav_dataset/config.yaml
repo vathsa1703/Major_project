@@ -85,6 +85,52 @@ obstacles:
   size_range_m: [40, 150]       # width and height of each rectangle
   excess_loss_db: 15.0          # ENGINEERING ASSUMPTION: extra loss on a blocked link (sensitivity range 10-25)
 
+# Model mismatch ("the AI helps when reality does not match the textbook model"; results/mismatch/). ALL OFF by default:
+# with these defaults the game is the old one, bit for bit. When on, the TRUE world (env.step: who is really served;
+# the radio layer allocates with the true gains, as a base station that measures its channels) differs from the
+# NOMINAL textbook model above (Al-Hourani mean path loss + obstacles.excess_loss_db on the known buildings), which the
+# model-based pilots (B3, B6, ...) keep using to plan (env.evaluate(model="nominal")). Every value is an ENGINEERING
+# ASSUMPTION (no primary source verified; to read: 3GPP TR 36.777 Annex B, TR 38.901 shadow fading, Al-Hourani et al.
+# Globecom 2014). Each perturbation has its own rng stream (scenario seed, stream, draw).
+# (c) "true Al-Hourani parameters of another environment class" is NOT built: the project has not verified any
+# (a, b, eta_LoS, eta_NLoS) row besides the one above (docs/assumptions.md), so there is no sourced value to use.
+mismatch:
+  draw: 0                       # perturbation draw id: 1, 2, ... re-draw every perturbation of a scenario (check that
+                                # a policy did not memorise one map)
+  shadow_sigma_db: 0.0          # (a) user-side correlated log-normal shadowing, std at grazing elevation (dB);
+                                # std(theta) = sigma * (1 - theta/90). Room grid {0, 4, 8}; range 0-12
+  shadow_corr_m: 50.0           # correlation length of the user-side field (m; correlation 1/e at this distance).
+                                # Room grid {25, 50, 150}; range 10-200
+  shadow_res_frac: 0.25         # ENGINEERING CHOICE: field grid spacing = corr x this (bilinear interpolation)
+  excess_loss_db: null          # (b) TRUE loss of a blocked link (dB); null = the planner's obstacles.excess_loss_db.
+                                # Room grid {25} vs the nominal 15; range 10-30
+  hidden_obstacles: 0           # (d) extra buildings in the true world only (absent from the planner's map), same
+                                # size range as obstacles. Room grid {0, 2, 4}
+
+# Off-grid refinement (pattern search) for B6r / B6true and the measured search of B6meas (reviewer amendment 2:
+# so a continuous-action AI cannot win by grid resolution alone). ENGINEERING CHOICES.
+refine:
+  steps_m: [100, 50, 25]        # horizontal probe distances, coarse to fine; altitude probes are half of these
+  max_moves_per_step: 20        # cap on improving moves at one probe distance (B6r / B6true only)
+
+# B6meas (learning-free adaptive baseline, level 1 information parity with the AI: aggregate MEASURED coverage each
+# second + the nominal model + its own flight). See baselines.B6Measured. Tuned on design seeds 10000-10009 x cells
+# mm_none, mm_bl25, mm_s8_c50, mm_h4 (16 variants, mismatch_exp.py tune; never val), then FROZEN at the best mean:
+# k 3, dwell 2 s, no altitude probes, steps [50, 25] (0.8489 vs B6 0.8468 on the same; table in room.md).
+b6meas:
+  k: 3                          # nominal top-k spots surveyed (tuned over {3, 5})
+  min_sep_m: 300                # the k spots are at least this far apart horizontally
+  dwell_s: 2                    # seconds measured at each surveyed spot (tuned over {2, 10})
+  probe_dwell_s: 2              # seconds measured at each pattern-search probe
+  steps_m: [50, 25]             # probe distances of the measured pattern search; null = refine.steps_m (tuned over
+                                # {[100, 50, 25], [50, 25]})
+  alt_probes: false             # pattern search also probes altitude +/- step/2 (tuned over {false, true})
+  improve_min: 0.002            # a probe must beat the centre's measured coverage by this much to be kept
+  recheck_s: 30                 # on station: every recheck_s compare the measured coverage with the committed one ...
+  recheck_drop: 0.05            # ... and restart (nominal re-plan + survey) if it fell by more than this
+  arrive_tol_m: 0.5             # arrived = within this distance horizontally and vertically
+  max_leg_s: 120                # give up a leg after this long (never happens on the 2 km map at 15 m/s)
+
 # small-scale fading (Phase 4). Off = average channel (deterministic baselines, dataset sweep).
 fading:
   enabled: false
@@ -317,6 +363,34 @@ profiles:
   # G5 training cells with the ANNOUNCED schedule (owner, D-54): the AI sees event_countdown + event_announce
   sites_d20_t0_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 0, announced: true}}
   sites_d20_t60_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 60, announced: true}}
+  # Model mismatch (results/mismatch/): `rl_static` (still crowds) with the owner's G5 settings (D-48), and one
+  # perturbation type per cell. mm_s<sigma>_c<corr> = user-side shadowing; mm_bl25 = true building loss 25 dB (planner
+  # 15); mm_h<n> = n hidden buildings; mm_none = no mismatch (negative control). mm_hard_* = the same on `hard`
+  # (robustness check only).
+  mm_none: &mm
+    area_m: 2000
+    uav: {p_max_dbm: 20, a_max_mps2: 4}
+    obstacles: {n_range: [3, 8], size_range_m: [60, 200]}
+    mobility: {choices: [static]}
+    energy: {battery_wh: 16}
+    baselines: {grid_n: 14}
+    env: {access: noma_opt}
+    access: {sic_eps: 0.05, rescue_first: true}
+  mm_s4_c25: {<<: *mm, mismatch: {shadow_sigma_db: 4, shadow_corr_m: 25}}
+  mm_s4_c50: {<<: *mm, mismatch: {shadow_sigma_db: 4, shadow_corr_m: 50}}
+  mm_s4_c150: {<<: *mm, mismatch: {shadow_sigma_db: 4, shadow_corr_m: 150}}
+  mm_s8_c25: {<<: *mm, mismatch: {shadow_sigma_db: 8, shadow_corr_m: 25}}
+  mm_s8_c50: {<<: *mm, mismatch: {shadow_sigma_db: 8, shadow_corr_m: 50}}
+  mm_s8_c150: {<<: *mm, mismatch: {shadow_sigma_db: 8, shadow_corr_m: 150}}
+  mm_bl25: {<<: *mm, mismatch: {excess_loss_db: 25}}
+  mm_h2: {<<: *mm, mismatch: {hidden_obstacles: 2}}
+  mm_h4: {<<: *mm, mismatch: {hidden_obstacles: 4}}
+  # EXPLORATORY (added after the room test found no passing cell; not in the pre-registered grid): a larger dose
+  mm_h8: {<<: *mm, mismatch: {hidden_obstacles: 8}}
+  mm_combo: {<<: *mm, mismatch: {shadow_sigma_db: 8, shadow_corr_m: 150, excess_loss_db: 25, hidden_obstacles: 4}}
+  mm_hard_none: &mmh
+    <<: *mm
+    mobility: {choices: [hotspot_jump, surge, group_drift, attraction]}
 
 # Reinforcement learning (Gate G4). Train on the training seeds only; pick models on val; touch test once at the end.
 rl:
