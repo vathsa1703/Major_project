@@ -221,8 +221,9 @@ def analyse(a):
 
 # ---------------------------------------------------------------- plots
 INK, INK2, GRID = "#0b0b0b", "#52514e", "#e4e3df"
-SERIES = {"B6 sigma 10 m": ("#2a78d6", "-", "o"), "B6 sigma 50 m": ("#2a78d6", "--", "s"),
-          "B3 sigma 10 m": ("#eb6834", "-", "^")}
+# colour, line, marker, x dodge (a factor: the f axis is logarithmic)
+SERIES = {"B6 sigma 10 m": ("#2a78d6", "-", "o", 0.96), "B6 sigma 50 m": ("#2a78d6", "--", "s", 1.0),
+          "B3 sigma 10 m": ("#eb6834", "-", "^", 1.04)}
 
 
 def _axes_style(ax):
@@ -242,16 +243,15 @@ def plots(T, out):
     profs = [p for p in PROFILES if p in set(T.profile)]
     fig, axes = plt.subplots(1, len(profs), figsize=(5.2 * len(profs), 4.2), sharey=True, squeeze=False)
     for ax, prof in zip(axes[0], profs, strict=True):
-        for label, (col, ls, mk) in SERIES.items():
+        for label, (col, ls, mk, dodge) in SERIES.items():
             pl, s = label.split()[0], float(label.split()[2])
             d = T[(T.profile == prof) & (T.planner == pl) & (T.sigma_m == s) & (T.age_s == 0)
                   & T.f.isin(F_GRID)].sort_values("f")
             if len(d) < 2:
                 continue
-            ax.errorbar(d.f, d.ratio, yerr=[d.ratio - d.ratio_lo, d.ratio_hi - d.ratio], color=col, ls=ls, marker=mk,
-                        ms=6, lw=2, capsize=3, label=label)
-        ax.axhline(TARGET, color=INK2, lw=1, ls=":")
-        ax.text(0.052, TARGET + 0.004, "98% of full information", color=INK2, fontsize=8)
+            ax.errorbar(d.f * dodge, d.ratio, yerr=[d.ratio - d.ratio_lo, d.ratio_hi - d.ratio], color=col, ls=ls,
+                        marker=mk, ms=6, lw=2, capsize=3, label=label)
+        ax.axhline(TARGET, color=INK2, lw=1, ls=":", label="98% of full information")
         ax.axhline(1.0, color=GRID, lw=1)
         ax.set_xscale("log")
         ax.set_xticks(F_GRID)
