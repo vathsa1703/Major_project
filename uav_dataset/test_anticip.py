@@ -106,6 +106,13 @@ def test_new_and_old_cell_runners(monkeypatch, tmp_path):
     assert list(t.bar_pilot) == ["B6dep", "B6dep"] and np.allclose(t.h, 0.05)
 
 
+def test_decomposition_runner(monkeypatch):
+    small_profiles(monkeypatch)
+    row = ax.decomp_one("sites_d20_t0_ann", 100)
+    assert row["announced"] and all(0.0 <= row[p] <= 1.0 for p in ("dp", *ax.DECOMP_PILOTS))
+    assert row["teleport"] >= row["dp_model"] - 1e-12
+
+
 def test_fit_and_evaluate_end_to_end_on_synthetic_rows(monkeypatch, tmp_path):
     import json
 

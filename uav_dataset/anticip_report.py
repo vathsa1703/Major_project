@@ -27,14 +27,16 @@ def new_table():
 
 def decomp_table(g5_dirs):
     """Per G5 cell (val seeds 100-119): dp -> best simple pilot (bar: best by cell mean of B6, B7, B8, B6fc from the
-    G5 evaluation, plus B6dep) -> B3 (full information, the agent's control set: fixed 150 m altitude, no forecast) ->
-    B3obsUN (B3's search with only the agent's information) -> best G5 agent (by cell mean)."""
+    G5 evaluation, plus B6dep) -> B6 (no forecast, no announcement) -> B3 (B6 without the altitude choice, i.e. the
+    goto agent's control set: fixed 150 m altitude; full information) -> B3obsUN (B3's search with only the agent's
+    information) -> best G5 agent (by cell mean)."""
     p = ax.OUT / "decomp_episodes.csv"
     if not p.exists():
         return []
     d = pd.read_csv(p, float_precision="round_trip")
-    L = ["| cell | n | dp | bar (pilot) | B3 | B3obsUN | best agent | foresight dp - bar | tools bar - B3 | information "
-         "B3 - B3obsUN | learning B3obsUN - agent | total dp - agent | B6 check |", "|" + "---|" * 13]
+    L = ["| cell | n | dp | bar (pilot) | B6 | B3 | B3obsUN | best agent | foresight dp - bar | announcement use "
+         "bar - B6 | altitude B6 - B3 | information B3 - B3obsUN | learning B3obsUN - agent | total dp - agent | "
+         "B6 check |", "|" + "---|" * 16]
     for cell, g5 in g5_dirs.items():
         x = d[d.cell == cell].sort_values("seed").set_index("seed")
         e = pd.read_csv(Path(g5) / "episodes.csv", float_precision="round_trip")
@@ -46,12 +48,34 @@ def decomp_table(g5_dirs):
         cols["B6dep"] = x.B6dep
         bar = max(cols, key=lambda b: cols[b].mean())
         chk = float(np.max(np.abs(piv.B6 - x.B6)))
-        parts = [(x.dp, cols[bar]), (cols[bar], x.B3), (x.B3, x.B3obsUN), (x.B3obsUN, piv[best_agent]),
+        parts = [(x.dp, cols[bar]), (cols[bar], x.B6), (x.B6, x.B3), (x.B3, x.B3obsUN), (x.B3obsUN, piv[best_agent]),
                  (x.dp, piv[best_agent])]
         txt = [f"{m:+.3f} +/- {h:.3f}" for m, h in (paired_diff(a, b) for a, b in parts)]
-        L.append(f"| {cell} | {len(x)} | {x.dp.mean():.3f} | {cols[bar].mean():.3f} ({bar}) | {x.B3.mean():.3f} | "
+        L.append(f"| {cell} | {len(x)} | {x.dp.mean():.3f} | {cols[bar].mean():.3f} ({bar}) | {x.B6.mean():.3f} | "
+                 f"{x.B3.mean():.3f} | "
                  f"{x.B3obsUN.mean():.3f} | {piv[best_agent].mean():.3f} ({best_agent.replace('g5r1_', '')}) | "
                  + " | ".join(txt) + f" | {chk:.1e} |")
+    return L
+
+
+def exploratory(fit_cells, new):
+    """POST HOC (not part of the pre-registered test): would another transit definition have predicted the new cells?
+    For rho scaled by s in {1 (pre-registered), 0.5, 0 (T_tr = D / v_max)}: the power model fitted on the 9 fit cells,
+    its R^2 and calls on the 8 new cells; and fitted on all 17 (in-sample R^2, leave-one-out RMSE)."""
+    allc = pd.concat([fit_cells[["cell", "rho_m", "h"]], new[["cell", "rho_m", "h"]]], ignore_index=True)
+    L = ["| rho used | fit 9 -> new 8: R^2 | calls right | all 17: params (a, p, q) | in-sample R^2 | LOO RMSE |",
+         "|---|---|---|---|---|---|"]
+    f, pr, _ = ax.MODELS["power"]
+    for s in (1.0, 0.5, 0.0):
+        par = pd.DataFrame([ax.cell_params(c, s * r) for c, r in zip(allc.cell, allc.rho_m, strict=True)])
+        A, M, h = par.A.values, par.M.values, allc.h.values
+        fit9 = np.arange(len(allc)) < len(fit_cells)
+        p9 = f(A[fit9], M[fit9], h[fit9])
+        pn = pr(p9, A[~fit9], M[~fit9])
+        calls = int(((pn >= ax.PASS_MARK) == (h[~fit9] >= ax.PASS_MARK)).sum())
+        p17 = f(A, M, h)
+        L.append(f"| {s:g} x rho | {ax.r2(pn, h[~fit9]):.3f} | {calls}/8 | {', '.join(f'{v:.3g}' for v in p17)} | "
+                 f"{ax.r2(pr(p17, A, M), h):.3f} | {ax.loo_rmse('power', A, M, h):.4f} |")
     return L
 
 
@@ -64,7 +88,8 @@ def figure(fit_cells, new, model, path):
                          "ytick.color": ink, "axes.spines.top": False, "axes.spines.right": False})
     fig, axs = plt.subplots(1, 3, figsize=(13, 4.2))
     # (a) h vs A, marker size ~ M
-    for t, col, lab in ((fit_cells, blue, "fit cells (9, seeds 1000-1019)"), (new, orange, "new cells (8, seeds 2000-2011)")):
+    sets = ((fit_cells, blue, "fit cells (9, seeds 1000-1019)"), (new, orange, "new cells (8, seeds 2000-2011)"))
+    for t, col, lab in sets:
         axs[0].scatter(np.maximum(t.A, 1e-3), t.h, s=20 + 400 * t.M, color=col, edgecolor="white", linewidth=1.5,
                        label=lab, zorder=3)
     axs[0].set_xscale("log")
@@ -84,8 +109,11 @@ def figure(fit_cells, new, model, path):
                     elinewidth=1, capsize=0, zorder=3)
     axs[2].errorbar(new.h_pred, new.h, yerr=new.h_ci, fmt="o", color=orange, ms=6, mec="white", elinewidth=1,
                     capsize=0, zorder=3)
-    for hp, hm, c in zip(new.h_pred, new.h, new.cell, strict=True):
-        axs[2].annotate(c.replace("sites_", ""), (hp, hm), textcoords="offset points", xytext=(4, 3), fontsize=7,
+    order = np.argsort(new.h_pred.values)
+    for i, j in enumerate(order):                      # alternate label sides so neighbours do not collide
+        r = new.iloc[j]
+        axs[2].annotate(r.cell.replace("sites_", ""), (r.h_pred, r.h), textcoords="offset points",
+                        xytext=(6, 4) if i % 2 else (-6, -10), ha="left" if i % 2 else "right", fontsize=7,
                         color=muted)
     axs[2].axvline(ax.PASS_MARK, color=muted, linewidth=1, linestyle="--", zorder=0)
     axs[2].set_xlabel(f"predicted h (model '{model}'; fit cells: fitted)")
@@ -118,7 +146,8 @@ def evaluate(confirm_csv, g5_dirs=None):
          "## Verdict", "",
          f"- R^2 (1 - SS_res/SS_tot, predicted vs measured h, 8 new cells) = **{r2:.3f}** (pass >= {R2_MIN}): "
          f"**{'PASS' if ok_r2 else 'FAIL'}**  (Pearson r = {corr:.3f}, r^2 = {corr ** 2:.3f}, for information)",
-         f"- correct room / no-room call at h >= {ax.PASS_MARK}: **{int(right.sum())}/8 = {right.mean():.0%}** (pass >= "
+         f"- correct room / no-room call at h >= {ax.PASS_MARK}: **{int(right.sum())}/8 = {right.mean():.0%}** "
+         f"(pass >= "
          f"{CALL_MIN:.0%}): **{'PASS' if ok_call else 'FAIL'}**",
          f"- overall: **{'RULE CONFIRMED' if ok_r2 and ok_call else 'RULE NOT CONFIRMED'}**", "",
          "## All 17 cells", "",
@@ -134,7 +163,8 @@ def evaluate(confirm_csv, g5_dirs=None):
         L.append(f"| {r.cell} | NEW | {r.D_m:.0f} | {r.tau_s:.0f} | {r.v_max:.0f} | {r.T_s:.0f} | {r.rho_m:.0f} | "
                  f"{r.T_tr_s:.1f} | {r.A:.3f} | {r.M:.4f} | {r.bar_pilot} | {r.bar:.3f} | {r.dp:.3f} | "
                  f"{r.h:+.4f} +/- {r.h_ci:.4f} | {r.h_unann:+.4f} | {r.h_pred:.4f} | {'yes' if ok else 'NO'} |")
-    L += ["", "### New cells: pilot means", "", "| cell | n | B6 | B6fc_u | B6fc_a | B6dep | dp | teleport | secs/scenario |",
+    L += ["", "### New cells: pilot means", "",
+          "| cell | n | B6 | B6fc_u | B6fc_a | B6dep | dp | teleport | secs/scenario |",
           "|---|---|---|---|---|---|---|---|---|"]
     for c in ax.NEW_CELLS:
         d = df[df.cell == c]
@@ -145,10 +175,14 @@ def evaluate(confirm_csv, g5_dirs=None):
     dec = decomp_table(g5_dirs or {})
     if dec:
         L += ["## Gap decomposition on the G5 cells (val seeds 100-119, announced)", "",
-              "Chain dp -> best simple pilot -> B3 (full information, the goto agent's controls: 150 m, no forecast) "
-              "-> B3obsUN (same search, only the agent's information) -> best G5 round-1 agent. Paired means +/- 95% "
-              "CI; the four parts add up to the total.", ""] + dec + [""]
-    L += [f"![figure]({FIG})", ""]
+              "Chain dp -> best simple pilot -> B6 (greedy, no announcement) -> B3 (no altitude choice: the goto "
+              "agent's controls, 150 m; full information) -> B3obsUN (same search, only the agent's information) -> "
+              "best G5 round-1 agent. Paired means +/- 95% CI; the five parts add up to the total.", ""] + dec + [""]
+    L += ["## POST HOC (not pre-registered): other transit definitions", "",
+          "Exploratory only; the verdict above stands. s x rho = footprint radius scaled by s in T_tr = max(0, D - 2 s "
+          "rho) / v_max; s = 0 means T_tr = D / v_max. Power model as pre-registered.", ""]
+    L += exploratory(fit_cells, new)
+    L += ["", f"![figure]({FIG})", ""]
     text = "\n".join(L)
     (ax.OUT / "summary.md").write_text(text, encoding="utf-8")
     figure(fit_cells, new, model, ax.OUT / FIG)
