@@ -135,11 +135,8 @@ def run_cell(a):
                 append(csv, [r])
                 print(f"  {key(job)} done", flush=True)
         run(_prep, [s for s in seeds if ("dp", s) not in done], lambda s: f"prep {s}")
-        if models and not a.no_oma:
-            oma_done = out / "prep_oma.done"
-            if not oma_done.exists():
-                run(_prep_oma, list(seeds), lambda s: f"prep_oma {s}")
-                oma_done.write_text("ok")
+        if not a.no_oma:                                   # cached per scenario: a rerun only loads the tables
+            run(_prep_oma, list(seeds), lambda s: f"prep_oma {s}")
         run(_schedule, [(n, s) for n in ("B6never", "ceiling") for s in seeds if (n, s) not in done],
             lambda j: f"{j[0]} {j[1]}")
         run(_task, [(n, s, None) for n in BAR for s in seeds if (n, s) not in done], lambda j: f"{j[0]} {j[1]}")
