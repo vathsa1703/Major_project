@@ -34,7 +34,7 @@ from uav_env import UAVEnv
 OUT = Path(__file__).parent / "results" / "anticipation"
 OLD_CELLS = list(sites_exp.CELLS)                     # the 9 D-52 cells (fit set)
 OLD_SEEDS = list(range(1000, 1020))                   # their fresh seeds (D-52 phase 4)
-NEW_CELLS = ["sites_v8_d15_t60", "sites_v25_d15_t60", "sites_v8_d10_t0", "sites_v25_d20_t0",
+NEW_CELLS = ["sites_v8_d15_t60", "sites_v25_d15_t60", "sites_v8_d20_t0", "sites_v25_d20_t0",
              "sites_T600_d20_t0", "sites_T600_d15_t60", "sites_d175_t30", "sites_d125_t120"]   # test set (prereg)
 NEW_SEEDS = list(range(2000, 2012))                   # fresh, disjoint from every earlier seed set (12: owner, before any run)
 FOOT_SEEDS = list(range(20))                          # design seeds: rho is a property of the physics, not an outcome
@@ -305,18 +305,82 @@ def merge(kind):
     print(f"merged {len(files)} files: {len(df)} rows ({len(cells)} cells x {len(seeds)} seeds)")
 
 
-# ---------------------------------------------------------------- the model (pre-registered form)
+# ---------------------------------------------------------------- the models (pre-registered candidates + selection)
+H_FLOOR = 1e-3      # loglin: h below this is set to it before taking logs (pre-registered; h is a mean of differences)
+
+
 def model_h(k, A, M):
-    """Primary model: h = k * M * A / (1 + A). Monotone increasing in A and in M; h -> 0 when the transit vanishes
+    """Candidate 'ratio': h = k * M * A / (1 + A). Monotone increasing in A and in M; h -> 0 when the transit vanishes
     (M = 0) and h -> k M when the switch is much faster than the transit (A >> 1)."""
     A, M = np.asarray(A, dtype=float), np.asarray(M, dtype=float)
     return k * M * A / (1.0 + A)
 
 
 def fit_k(A, M, h):
-    """Least-squares k (closed form) for the primary model."""
+    """Least-squares k (closed form) for the 'ratio' candidate."""
     g = M * A / (1.0 + A)
     return float(np.dot(g, h) / np.dot(g, g))
+
+
+def fit_loglin(A, M, h):
+    """Candidate 'loglin': log h = a + b log A + c M (ordinary least squares on log max(h, H_FLOOR)); h = e^a A^b e^(cM).
+    Monotone (increasing) only if b >= 0 and c >= 0."""
+    X = np.column_stack([np.ones(len(A)), np.log(A), M])
+    coef, *_ = np.linalg.lstsq(X, np.log(np.maximum(h, H_FLOOR)), rcond=None)
+    return [float(v) for v in coef]
+
+
+def pred_loglin(p, A, M):
+    a, b, c = p
+    return np.exp(a + b * np.log(np.asarray(A, dtype=float)) + c * np.asarray(M, dtype=float))
+
+
+POW_P = np.round(np.arange(0.05, 2.0001, 0.01), 2)        # power: exponent grids (pre-registered)
+POW_Q = np.round(np.arange(0.0, 2.0001, 0.01), 2)
+
+
+def pred_power(p, A, M):
+    a, pm, q = p
+    A, M = np.asarray(A, dtype=float), np.asarray(M, dtype=float)
+    return a * np.power(M, pm) * np.power(A / (1.0 + A), q)
+
+
+def fit_power(A, M, h):
+    """Candidate 'power': h = a * M^p * (A / (1 + A))^q, p in [0.05, 2], q in [0, 2] (grid, step 0.01), a by least
+    squares (closed form) for each (p, q); the (p, q) with the smallest squared error (ties: first in grid order).
+    Monotone increasing in A and M for a >= 0; h = 0 when M = 0."""
+    best = None
+    for pm in POW_P:
+        Mp = np.power(M, pm)
+        for q in POW_Q:
+            g = Mp * np.power(A / (1.0 + A), q)
+            gg = float(np.dot(g, g))
+            a = float(np.dot(g, h) / gg) if gg > 0 else 0.0
+            sse = float(np.sum((h - a * g) ** 2))
+            if best is None or sse < best[0] - 1e-18:
+                best = (sse, [a, float(pm), float(q)])
+    return best[1]
+
+
+MODELS = {          # name -> (fit(A, M, h) -> params, predict(params, A, M), monotone(params))
+    "ratio": (lambda A, M, h: [fit_k(A, M, h)], lambda p, A, M: model_h(p[0], A, M), lambda p: p[0] >= 0),
+    "power": (fit_power, pred_power, lambda p: p[0] >= 0),
+    "loglin": (fit_loglin, pred_loglin, lambda p: p[1] >= 0 and p[2] >= 0),
+}
+# loglin is reported but NOT selectable: on the fit cells it won the leave-one-out comparison against 'ratio', but its
+# exp(c M) term extrapolates to h = 0.31 on a test cell with M twice the fit range (seen BEFORE any new-cell run; the
+# candidate set was then fixed as below; docs/prereg/anticipation_rule.md section 4).
+SELECTABLE = ("ratio", "power")
+
+
+def loo_rmse(name, A, M, h):
+    """Leave-one-out RMSE of a candidate on the fit cells (each cell predicted by the model fitted on the other 8)."""
+    f, pr, _ = MODELS[name]
+    err = []
+    for i in range(len(h)):
+        m = np.arange(len(h)) != i
+        err.append(pr(f(A[m], M[m], h[m]), A[i:i + 1], M[i:i + 1])[0] - h[i])
+    return float(np.sqrt(np.mean(np.square(err))))
 
 
 def r2(pred, meas):
@@ -364,39 +428,102 @@ def fit(confirm_csv):
     par = pd.DataFrame([dict(cell=c, **cell_params(c, rho[c])) for c in OLD_CELLS])
     t = par.merge(ann[["cell", "bar_pilot", "bar", "dp", "h", "h_ci"]], on="cell")
     t["h_unann"] = una.set_index("cell").loc[t.cell, "h"].values
-    k = fit_k(t.A.values, t.M.values, t.h.values)
-    t["h_fit"] = model_h(k, t.A, t.M)
+    A, M, h = t.A.values, t.M.values, t.h.values
     new = pd.DataFrame([dict(cell=c, **cell_params(c, rho[c])) for c in NEW_CELLS])
-    new["h_pred"] = model_h(k, new.A, new.M)
+    cand = {}
+    for name, (f, pr, mono) in MODELS.items():
+        p = f(A, M, h)
+        cand[name] = dict(params=p, monotone=bool(mono(p)), loo_rmse=loo_rmse(name, A, M, h),
+                          r2_fit=r2(pr(p, A, M), h), fitted=pr(p, A, M).tolist(), pred=pr(p, new.A, new.M).tolist())
+    ok = [n for n in SELECTABLE if cand[n]["monotone"]]
+    chosen = min(ok, key=lambda n: (cand[n]["loo_rmse"], n))        # pre-registered selection rule (SELECTABLE only)
+    t["h_fit"] = cand[chosen]["fitted"]
+    new["h_pred"] = cand[chosen]["pred"]
+    for n in MODELS:
+        new[f"h_pred_{n}"] = cand[n]["pred"]
     new["call"] = np.where(new.h_pred >= PASS_MARK, "room", "no room")
-    res = dict(k=k, r2_fit=r2(t.h_fit, t.h), b6_rerun_max_abs_diff=diff, rho=rho,
-               fit_cells=t.to_dict(orient="records"), predictions=new.to_dict(orient="records"))
+    res = dict(model=chosen, params=cand[chosen]["params"], r2_fit=cand[chosen]["r2_fit"], candidates=cand,
+               b6_rerun_max_abs_diff=diff, rho=rho, fit_cells=t.to_dict(orient="records"),
+               predictions=new.to_dict(orient="records"))
     (OUT / "fit.json").write_text(json.dumps(res, indent=1, default=float), encoding="utf-8")
-    L = [f"k = {k:.5f}; fit R^2 on the 9 cells = {res['r2_fit']:.3f}; B6 re-run vs phase-4 file: max |diff| = "
-         f"{diff:.2e}", "", "| cell | D m | tau s | v_max | T s | rho m | T_tr s | A | M | bar (ann.) | h ann. (95% CI) | "
-         "h unann. | model |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    L = [f"chosen model: {chosen} (lowest leave-one-out RMSE among the selectable monotone candidates {SELECTABLE}), params "
+         f"{cand[chosen]['params']}; fit R^2 on the 9 cells = {res['r2_fit']:.3f}; B6 re-run vs phase-4 file: max "
+         f"|diff| = {diff:.2e}", "", "| candidate | params | monotone | LOO RMSE | fit R^2 |", "|---|---|---|---|---|"]
+    L += [f"| {n} | {', '.join(f'{v:.4g}' for v in c['params'])} | {c['monotone']} | {c['loo_rmse']:.4f} | "
+          f"{c['r2_fit']:.3f} |" for n, c in cand.items()]
+    L += ["", "| cell | D m | tau s | v_max | T s | rho m | T_tr s | A | M | bar (ann.) | h ann. (95% CI) | "
+          "h unann. | model |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in t.itertuples():
         L.append(f"| {r.cell} | {r.D_m:.0f} | {r.tau_s:.0f} | {r.v_max:.0f} | {r.T_s:.0f} | {r.rho_m:.0f} | "
                  f"{r.T_tr_s:.1f} | {r.A:.3f} | {r.M:.4f} | {r.bar_pilot} {r.bar:.3f} | {r.h:+.4f} +/- {r.h_ci:.4f} | "
                  f"{r.h_unann:+.4f} | {r.h_fit:.4f} |")
-    L += ["", "| new cell | D m | tau s | v_max | T s | rho m | T_tr s | A | M | predicted h | call (h >= 0.02) |",
-          "|---|---|---|---|---|---|---|---|---|---|---|"]
+    L += ["", "| new cell | D m | tau s | v_max | T s | rho m | T_tr s | A | M | PREDICTED h | call (h >= 0.02) | "
+          + " | ".join(f"({n})" for n in MODELS) + " |", "|" + "---|" * (11 + len(MODELS))]
     for r in new.itertuples():
         L.append(f"| {r.cell} | {r.D_m:.0f} | {r.tau_s:.0f} | {r.v_max:.0f} | {r.T_s:.0f} | {r.rho_m:.0f} | "
-                 f"{r.T_tr_s:.1f} | {r.A:.3f} | {r.M:.4f} | {r.h_pred:.4f} | {r.call} |")
+                 f"{r.T_tr_s:.1f} | {r.A:.3f} | {r.M:.4f} | {r.h_pred:.4f} | {r.call} | "
+                 + " | ".join(f"{getattr(r, f'h_pred_{n}'):.4f}" for n in MODELS) + " |")
     text = "\n".join(L)
     (OUT / "fit.md").write_text(text + "\n", encoding="utf-8")
     print(text)
 
 
+# ---------------------------------------------------------------- gap decomposition (G5 cells, val seeds)
+DECOMP_CELLS = ["sites_d20_t0_ann", "sites_d20_t60_ann"]      # the G5 round-1 training cells (announced)
+DECOMP_SEEDS = list(range(100, 120))                          # the G5 evaluation split (val)
+DECOMP_PILOTS = ("B6", "B6dep", "B3", "B3obsUN")
+
+
+def decomp_one(cell, seed):
+    """dp, teleport and B6 (check), B6dep, B3 (fixed 150 m altitude, full information: the control set of the G5
+    'goto' agents), B3obsUN (B3's search with only the agent's information: uncapped maps + crowd size) on one G5
+    evaluation scenario."""
+    md.apply_profile(cell)
+    t0 = time.time()
+    env = UAVEnv()
+    env.reset(seed=seed)
+    nodes = orc.oracle_nodes(env)
+    cov = sites_exp.shared_tensor(env, nodes)
+    sites_exp.tensor_backed(env, nodes, cov)
+    S = orc.segment_scores(cov)
+    value, _, target, _ = orc.dp_plan(S, orc.hop_graph(nodes, len(nodes) - 1), len(nodes) - 1)
+    row = dict(cell=cell, seed=seed, n_users=env.sc["n_users"], announced=bool(env.sc["announced"]),
+               teleport=float(S.max(axis=1).mean()), dp_model=value / S.shape[0])
+    c, _ = orc.episode_coverage(env, orc.PlanPolicy(nodes, target, "dp"), seed)
+    row["dp"] = float(c.mean())
+    for name in DECOMP_PILOTS:
+        c, steps = orc.episode_coverage(env, make_policy(name), seed)
+        row[name], row[f"{name}_survived"] = float(c.mean()), bool(steps >= env.T)
+    row["secs_total"] = time.time() - t0
+    md.apply_profile("default")
+    return row
+
+
+def decomp():
+    OUT.mkdir(parents=True, exist_ok=True)
+    csv = OUT / "decomp_episodes.csv"
+    done = _done(csv)
+    jobs = [(c, s) for s in DECOMP_SEEDS for c in DECOMP_CELLS if (c, s) not in done]
+    print(f"decomposition: {len(jobs)} scenarios to run", flush=True)
+    for i, (c, s) in enumerate(jobs, 1):
+        sites_exp._ROWS.clear()
+        row = decomp_one(c, s)
+        sites_exp.append(csv, [row])
+        print(f"  {i}/{len(jobs)} {c} seed {s}: " + " ".join(f"{p} {row[p]:.4f}" for p in ("dp", *DECOMP_PILOTS))
+              + f"  {row['secs_total']:.0f}s", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["footprint", "oldcells", "newcells", "merge", "fit", "evaluate"])
+    ap.add_argument("cmd", choices=["footprint", "oldcells", "newcells", "merge", "fit", "decomp", "evaluate"])
     ap.add_argument("kind", nargs="?", default=None, help="merge: old or new")
     ap.add_argument("--shard", default=None, help="k/n = run shard k (0-based) of n in this process")
     ap.add_argument("--cells", default=None, help="oldcells / newcells: a comma list, a subset of the cells")
     ap.add_argument("--confirm", default=str(sites_exp.OUT / "confirm_episodes.csv"),
                     help="the merged D-52 phase-4 file (seeds 1000-1019)")
+    g5 = Path(__file__).parent / "results" / "g5"
+    ap.add_argument("--g5", default=f"sites_d20_t0_ann={g5 / 'r1_t0'},sites_d20_t60_ann={g5 / 'r1_t60'}",
+                    help="evaluate: cell=folder of a G5 evaluation (episodes.csv), comma separated")
     a = ap.parse_args()
     shard = tuple(int(x) for x in a.shard.split("/")) if a.shard else None
     if a.cmd == "footprint":
@@ -407,9 +534,12 @@ def main():
         merge(a.kind)
     elif a.cmd == "fit":
         fit(a.confirm)
+    elif a.cmd == "decomp":
+        decomp()
     else:
         import anticip_report
-        anticip_report.evaluate(a.confirm)
+        g5 = dict(kv.split("=", 1) for kv in a.g5.split(","))
+        anticip_report.evaluate(a.confirm, g5)
 
 
 if __name__ == "__main__":

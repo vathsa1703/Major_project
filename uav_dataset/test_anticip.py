@@ -104,3 +104,39 @@ def test_new_and_old_cell_runners(monkeypatch, tmp_path):
     df = pd.DataFrame([dict(cell=c, seed=s, dp=0.8, B6=0.7, B6dep=0.75) for c in ("a", "b") for s in (1, 2)])
     t = ax.headroom_table(df, ["a", "b"], ("B6", "B6dep"))
     assert list(t.bar_pilot) == ["B6dep", "B6dep"] and np.allclose(t.h, 0.05)
+
+
+def test_fit_and_evaluate_end_to_end_on_synthetic_rows(monkeypatch, tmp_path):
+    import json
+
+    import anticip_report as rep
+    monkeypatch.setattr(ax, "OUT", tmp_path)
+    monkeypatch.setattr(rep, "PREREG", tmp_path / "prereg")
+    rng = np.random.default_rng(0)
+    cells = ax.OLD_CELLS + ax.NEW_CELLS
+    pd.DataFrame([dict(cell=c, seed=s, rho_m=600.0) for c in cells for s in (0, 1)]).to_csv(
+        tmp_path / "footprint.csv", index=False)
+
+    def rows(cs, seeds, pilots):
+        out = []
+        for c in cs:
+            p = ax.cell_params(c, 600.0)
+            for s in seeds:
+                base = 0.7 + 0.01 * rng.standard_normal()
+                r = dict(cell=c, seed=s, dp=base + ax.model_h(0.3, p["A"], p["M"]) + 0.002 * rng.standard_normal(),
+                         teleport=base + 0.2, secs_total=1.0, dp_survived=True)
+                for q in pilots:
+                    r[q], r[f"{q}_survived"] = base - (0.001 if q != "B6dep" else 0.0), True
+                out.append(r)
+        return pd.DataFrame(out)
+    old = rows(ax.OLD_CELLS, ax.OLD_SEEDS, (*ax.OLD_PILOTS, "B6dep"))
+    old.drop(columns=["B6dep"]).to_csv(tmp_path / "confirm.csv", index=False)
+    old.assign(B6dep_pre=0.5, B6dep_post=0.5).to_csv(tmp_path / "oldcells_episodes.csv", index=False)
+    ax.fit(tmp_path / "confirm.csv")
+    fit = json.loads((tmp_path / "fit.json").read_text())
+    assert fit["model"] in ax.MODELS and fit["b6_rerun_max_abs_diff"] == 0.0
+    assert fit["candidates"]["ratio"]["params"][0] == pytest.approx(0.3, rel=0.2)
+    rows(ax.NEW_CELLS, ax.NEW_SEEDS, ax.NEW_PILOTS).to_csv(tmp_path / "newcells_episodes.csv", index=False)
+    rep.evaluate(tmp_path / "confirm.csv", {})
+    text = (tmp_path / "summary.md").read_text()
+    assert "## Verdict" in text and (tmp_path / rep.FIG).exists() and (tmp_path / "prereg" / rep.FIG).exists()

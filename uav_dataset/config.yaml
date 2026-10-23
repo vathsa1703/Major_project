@@ -333,7 +333,7 @@ profiles:
   sites_v8_d15_t60: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 8}, sites: {distance_m: 1500, tau_s: 60}}
   sites_v25_d15_t60: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 25}, energy: {battery_wh: 24},
                       sites: {distance_m: 1500, tau_s: 60}}
-  sites_v8_d10_t0: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 8}, sites: {distance_m: 1000, tau_s: 0}}
+  sites_v8_d20_t0: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 8}, sites: {distance_m: 2000, tau_s: 0}}
   sites_v25_d20_t0: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 25}, energy: {battery_wh: 24},
                      sites: {distance_m: 2000, tau_s: 0}}
   sites_T600_d20_t0: {<<: *sites, mobility: {choices: [sites], episode_steps: 600}, energy: {battery_wh: 40},
