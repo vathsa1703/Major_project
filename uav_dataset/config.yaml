@@ -364,3 +364,24 @@ rl:
     gradient_steps: 1
     ent_coef: auto
     net_arch: [256, 256]
+
+# Hybrid timing AI (owner-approved; hybrid.py, hybrid_train.py, pre-registration docs/prereg/hybrid_timing.md).
+# B6 decides WHERE, a small PPO policy decides only WHEN to leave for the announced destination (Discrete(2) every
+# baselines.replan_every_steps). Used by nothing else; excluded from the oracle's and the hybrid's cache keys.
+hybrid:
+  obs_groups: [pos, vel, battery, time, prev, crowd_n, history, event_countdown, event_announce, heat_all_u,
+               heat_rescue_u]   # the G5 observation (raw groups + the announcement, D-54)
+  train_seeds: [10000, 10199]   # FIXED training pool (fresh procedural scenarios, disjoint from val/test)
+  timesteps: 100000             # decisions per training run (Round A, pre-registered)
+  train_seeds_per_cell: 3       # Round A: PPO training seeds 0..2 (seeds 3, 4 only if Round A beats the bar)
+  gamma: 0.95
+  ent_coef: 0.01                # ENGINEERING CHOICE: keeps the binary choice exploring early (categorical head)
+  net_arch: [64, 64]
+  n_envs: 4
+  n_steps: 256
+  batch_size: 256
+  n_epochs: 10
+  learning_rate: 0.0003
+  gae_lambda: 0.95
+  clip_range: 0.2
+  checkpoint_every: 25000       # decisions; checkpoints are for crash recovery only (the FINAL model is evaluated)

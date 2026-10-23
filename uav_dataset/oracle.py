@@ -173,8 +173,9 @@ def sample_times(env):
 
 
 def _cache_key(env):
-    # b6fc: the forecasting pilot's own section (added later; excluded so the existing caches stay valid)
-    cfg = {k: v for k, v in CFG.items() if k not in ("rl", "profiles", "active_profile", "oracle", "b6fc")}
+    # b6fc, hybrid: sections added later (the forecasting pilot, the hybrid timing AI); excluded so the existing caches
+    # stay valid
+    cfg = {k: v for k, v in CFG.items() if k not in ("rl", "profiles", "active_profile", "oracle", "b6fc", "hybrid")}
     blob = json.dumps([cfg, OCFG["sample_every_s"], env.access, env.sic_eps, env.rescue_first,
                        env.scenario_overrides], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
