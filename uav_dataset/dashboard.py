@@ -10,6 +10,7 @@ No network calls: everything is simulated on this computer.
 import altair as alt
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 import dashboard_core as dc
 
@@ -21,7 +22,7 @@ DEFAULTS = dict(w_profile="hard", w_seed=5, w_users=None, w_crowds=None, w_mobil
                 w_custom_bat=False, w_power=None, w_access="noma_opt", w_models=str(dc.default_models_dir()),
                 w_fly_pilot="B3", w_fly_pairs=False, w_cmp_mode="Different pilots", w_cmp_pilots=["B0", "B2", "B3"],
                 w_cmp_pilot="B3", w_cmp_schemes=["noma_opt", "oma_opt"], w_b_n=5, w_b_metric="coverage_full",
-                w_plan_fly=False)
+                w_plan_fly=False, w_3d_pilot="B3", w_3d_wind=False)
 for _k, _v in DEFAULTS.items():
     st.session_state.setdefault(_k, _v)
 for _k in list(st.session_state.keys()):
@@ -153,7 +154,9 @@ buildings, on a limited battery. Where should it fly, how high, and how should i
                "averaged over the 300 s mission (a drone with an empty battery serves nobody).")
 
     st.subheader("Try it yourself")
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c5.page_link(PAGES["flight3d"], label="3D flight", icon=":material/3d_rotation:")
+    c5.caption("Watch a simulated quadcopter fly the mission in 3D, with or without wind.")
     c1.page_link(PAGES["fly"], label="Fly a disaster", icon=":material/flight_takeoff:")
     c1.caption("Pick a disaster and a pilot, then scrub through the 300 s mission.")
     c2.page_link(PAGES["compare"], label="Compare", icon=":material/compare_arrows:")
@@ -409,7 +412,62 @@ def page_plan():
                        file_name=f"plan_seed{p.settings.seed}.csv", mime="text/csv", on_click="ignore")
 
 
-# ---------------------------------------------------------------- page 5: about
+# ---------------------------------------------------------------- page 5: 3D flight (the simulated quadcopter)
+def page_flight3d():
+    settings = scenario_controls()
+    opts = dc.pilot_options(models_dir())
+    st.title("3D flight")
+    st.caption(dc.describe(dc.build_scenario(settings)))
+    st.write("The same pilots, but flown by a **simulated quadcopter** instead of the point-mass game: the pilot's "
+             "speed command goes to an autopilot (like a real flight controller in velocity mode), which tilts the "
+             "drone to speed up (at most 30 degrees), with motor delay, drag, and, if switched on, wind and gusts. "
+             "So the drone lags, overshoots a little, and leans into the wind. No hardware: everything is simulated.")
+    c1, c2, c3 = st.columns([3, 1.3, 1], vertical_alignment="bottom")
+    keep_valid("w_3d_pilot", list(opts), "B3")
+    pilot = c1.selectbox("Pilot", list(opts), key="w_3d_pilot", format_func=lambda p: pilot_label(p, opts))
+    w = dc.quad_wind_preset()
+    wind = c2.toggle(f"Wind ({w['mean_mps']:g} m/s + gusts)", key="w_3d_wind",
+                     help=f"Mean wind {w['mean_mps']:g} m/s toward {w['dir_deg']:g} deg (counter-clockwise from "
+                          f"east) with random gusts (std {w['gust_std_mps']:g} m/s). Off = calm air.")
+    go = c3.button("Fly in 3D", type="primary", icon=":material/3d_rotation:", width="stretch")
+    slow_note([pilot], settings)
+    if go:
+        try:
+            with st.spinner("Flying the 300 s mission with the quadcopter model..."):
+                data = dc.flight3d(settings, pilot, wind=wind, models_dir=models_dir())
+        except (RuntimeError, ValueError) as err:
+            st.error(str(err))
+            return
+        st.session_state.update(f3d=data, f3d_key=(settings, (pilot, wind)))
+    if "f3d" not in st.session_state:
+        st.info("Choose a disaster on the left and a pilot above, then press **Fly in 3D**. Drag to orbit, scroll to "
+                "zoom, and tick *follow drone* to see it tilt.")
+        return
+    data = st.session_state["f3d"]
+    stale("f3d_key", settings, (pilot, wind))
+    try:
+        theme = st.context.theme.type or "auto"
+    except AttributeError:                    # older Streamlit: let the viewer follow the OS setting
+        theme = "auto"
+    page = dc.viewer3d_html(data, theme if theme in ("light", "dark") else "auto")   # our own template + data only
+    if hasattr(st, "iframe"):
+        st.iframe(page, height=640)
+    else:                                     # older Streamlit
+        components.html(page, height=640)
+    s = data["summary"]
+    cards = st.columns(5)
+    cards[0].metric("People served, mission average", f"{s['coverage_full']:.1%}", border=True)
+    cards[1].metric("Average people served", f"{s['people_served_avg']:.0f}", border=True)
+    cards[2].metric("Energy used", f"{s['energy_wh']:.2f} Wh", f"of {data['battery_wh0']:g} Wh", **NOTE)
+    cards[3].metric("Largest tilt", f"{s['max_tilt_deg']:.1f} deg", f"limit {data['quad']['tilt_max_deg']:g}", **NOTE)
+    cards[4].metric("Top ground speed", f"{s['max_ground_speed_mps']:.1f} m/s", border=True)
+    st.caption(f"{data['users']['n_drawn']} of {data['users']['n_pool']} people drawn (a fixed sample, to keep the "
+               "page light); people every 5 s, the drone 5 times a second. The drone is drawn 20x larger than life "
+               "(it is about 1.1 m across); building heights are for display only (the radio model uses their "
+               "footprint). Model and parameters: uav_dataset/quadsim.py and config.yaml `quad:`.")
+
+
+# ---------------------------------------------------------------- page 6: about
 def page_about():
     st.title("About this tool")
     st.markdown("""
@@ -431,6 +489,9 @@ real hardware. It is not fed live data, so it is **not** a digital twin.
 - **Pilots:** B0 parked in the middle; B1 follow the biggest crowd; B2 k-means crowd centres; B3 grid search; B4 swarm
   search (PSO); B5 energy-aware grid search; B6 grid search with altitude; B3obs* grid search with only the AI's
   information; random; and any trained AI (it sees only its own measurements).
+- **3D flight (optional):** the pilots' speed commands can also be flown by a simulated quadcopter (our own rigid-body
+  model with an autopilot, tilt and thrust limits, motor delay, drag, wind and gusts; quadsim.py). Off everywhere
+  else: all results on the other pages use the point-mass game.
 """)
     st.subheader("Assumptions (value, unit, where it comes from)")
     st.dataframe(dc.assumptions_table(), hide_index=True)
@@ -458,6 +519,7 @@ PAGES = {
     "fly": st.Page(page_fly, title="Fly a disaster", icon=":material/flight_takeoff:", url_path="fly"),
     "compare": st.Page(page_compare, title="Compare", icon=":material/compare_arrows:", url_path="compare"),
     "plan": st.Page(page_plan, title="Plan", icon=":material/map:", url_path="plan"),
+    "flight3d": st.Page(page_flight3d, title="3D flight", icon=":material/3d_rotation:", url_path="flight3d"),
     "about": st.Page(page_about, title="About", icon=":material/info:", url_path="about"),
 }
 st.navigation(list(PAGES.values())).run()

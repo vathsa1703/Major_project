@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import json
 import os
 import tempfile
 import threading
@@ -33,6 +34,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
 import make_dataset as md
+import quadsim
 from baselines import POLICIES, B6GridAltitude
 from compare_run import summarize_run
 from evalstats import mean_ci, paired_diff
@@ -297,7 +299,7 @@ _EPISODES, _BATCHES, _PLANS = _Cache(12), _Cache(16), _Cache(16)
 
 
 def clear_caches():
-    for c in (_EPISODES, _BATCHES, _PLANS):
+    for c in (_EPISODES, _BATCHES, _PLANS, _FLIGHTS):
         c.clear()
 
 
@@ -744,6 +746,97 @@ def render_plan(plan):
                  f"({ACCESS_INFO[env.access].split(':')[0]}); x = map centre", fontsize=10)
     _legend(ax)
     return fig
+
+
+# ---------------------------------------------------------------- 3D flight (Stage 5: the simulated quadcopter)
+VIEWER_HTML = HERE / "viewer3d.html"
+FLIGHT3D_MAX_USERS = 800          # survivors drawn in 3D (a seeded sample; keeps the page light)
+FLIGHT3D_FRAME_S = 5              # survivor positions / served flags every 5 s; the drone at 5 Hz
+BUILDING_HEIGHT_M = (15.0, 30.0)  # DISPLAY ONLY: the radio model treats buildings as 2D rectangles
+DRONE_SCALE = 20                  # the drone is drawn this much larger than life (it is ~1.1 m across)
+_FLIGHTS = _Cache(8)
+
+
+def flight3d(settings, pilot, wind=False, models_dir=None, max_users=FLIGHT3D_MAX_USERS,
+             frame_every_s=FLIGHT3D_FRAME_S):
+    """Fly one episode with the simulated quadcopter (quadsim.py; wind = the quad.wind_on preset or calm air) and
+    return a compact, JSON-serialisable dict for the 3D viewer: map size, buildings (with a display-only height),
+    a seeded sample of at most max_users survivors with positions and served flags every frame_every_s seconds
+    (codes '1' served, '0' not served, '2' not counted now: the other site of a competing-sites scenario), the drone
+    at 5 Hz (position, velocity, attitude, thrust, wind), per-second coverage / served / battery, and a summary."""
+    key = ("flight3d", settings, pilot, bool(wind), max_users, frame_every_s, _model_key(pilot, models_dir))
+    hit = _FLIGHTS.get(key)
+    if hit is not None:
+        return hit
+    with configured(settings):
+        env = UAVEnv(battery_wh=settings.battery_wh, scenario_overrides=settings.overrides(), access=settings.access,
+                     dynamics="quad", quad_overrides=quadsim.wind_overrides(bool(wind)))
+        env.reset(seed=settings.seed)
+        pol = make_pilot(pilot, models_dir)
+        pol.reset(env)
+        n_pool = len(env.rescue)
+        rng = np.random.default_rng([settings.seed, 31])                 # which survivors are drawn (display only)
+        keep = np.sort(rng.choice(n_pool, size=min(n_pool, int(max_users)), replace=False))
+        frames, sec, done, last_xy = [], dict(t=[], coverage=[], served=[], n_active=[], battery_wh=[]), False, None
+        while not done:
+            _, _, term, trunc, info = env.step(pol.act(env))
+            done = term or trunc
+            served, active = info["served"], info.get("active")
+            sec["t"].append(int(env.t))
+            sec["coverage"].append(round(float(info["coverage"]), 4))
+            sec["served"].append(int(served.sum()))
+            sec["n_active"].append(int(active.sum()) if active is not None else int(len(served)))
+            sec["battery_wh"].append(round(float(info["battery_wh"]), 4))
+            if env.t == 1 or env.t % int(frame_every_s) == 0 or done:
+                code = np.where(served[keep], "1", "0")
+                if active is not None:
+                    code = np.where(active[keep], code, "2")
+                xy = np.rint(env.user_xy()[keep]).astype(int).ravel().tolist()
+                frame = dict(t=int(env.t), s="".join(code.tolist()))
+                if not frames or xy != last_xy:              # positions only when someone moved (static crowds)
+                    frame["xy"] = last_xy = xy
+                frames.append(frame)
+        fl = np.array(env.flight, dtype=float)
+        cols = ("t", "x", "y", "h", "vx", "vy", "vz", "roll", "pitch", "yaw", "thrust", "wx", "wy", "wz")
+        nd = dict(t=2, x=1, y=1, h=2, vx=2, vy=2, vz=2, roll=4, pitch=4, yaw=4, thrust=3, wx=2, wy=2)
+        drone = {c: np.round(fl[:, k], nd[c]).tolist() for k, c in enumerate(cols) if c in nd}
+        drone["dt"] = float(md.CFG["quad"]["sample_every_s"])
+        brng = np.random.default_rng([settings.seed, 32])
+        buildings = [[round(float(v), 1) for v in b] + [round(float(brng.uniform(*BUILDING_HEIGHT_M)), 1)]
+                     for b in env.boxes]
+        q = env.quad_cfg
+        data = dict(
+            v=1, L=float(env.L), steps=int(env.T), steps_flown=int(env.t), seed=int(settings.seed),
+            profile=settings.profile, pilot=pilot, access=env.access, h_min=float(env.uav["h_min_m"]),
+            h_max=float(env.uav["h_max_m"]), battery_wh0=round(env.battery_j / 3600.0, 3),
+            wind=dict(on=bool(wind), **{k: float(v) for k, v in q["wind"].items()}),
+            quad=dict(arm_m=float(q["arm_m"]), rotor_r_m=round(float(np.sqrt(md.CFG["energy"]["A_m2"] / 4 / np.pi)), 3),
+                      tilt_max_deg=float(q["tilt_max_deg"]), scale=DRONE_SCALE),
+            buildings=buildings, building_height_note="display only",
+            users=dict(n_pool=int(n_pool), n_counted=int(env.sc["n_users"]), n_drawn=int(len(keep)),
+                       rescue="".join(np.where(env.rescue[keep], "1", "0").tolist()), frames=frames),
+            drone=drone, sec=sec,
+            summary=dict(coverage_full=round(float(np.sum(sec["coverage"]) / env.T), 4),
+                         survived=bool(env.t >= env.T), steps=int(env.t),
+                         energy_wh=round(env.energy_used_j / 3600.0, 3),
+                         people_served_avg=round(env.served_user_s / (env.T * env.dt), 1),
+                         max_tilt_deg=round(float(np.degrees(np.arccos(np.clip(
+                             np.cos(fl[:, 7]) * np.cos(fl[:, 8]), -1, 1))).max()), 2),
+                         max_ground_speed_mps=round(float(np.hypot(fl[:, 4], fl[:, 5]).max()), 2)))
+    return _FLIGHTS.put(key, data)
+
+
+def quad_wind_preset():
+    """The 'wind on' preset of the 3D page (config quad.wind_on)."""
+    return dict(md.BASE_CFG["quad"]["wind_on"])
+
+
+def viewer3d_html(data, theme="auto"):
+    """The 3D viewer page (viewer3d.html) with the flight3d() data embedded. theme: light | dark | auto (= the
+    viewer's OS setting). Loads only the pinned three.js r128 scripts from cdnjs / jsdelivr."""
+    assert theme in ("light", "dark", "auto")
+    payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
+    return VIEWER_HTML.read_text(encoding="utf-8").replace("__THEME__", theme).replace("__FLIGHT_JSON__", payload)
 
 
 # ---------------------------------------------------------------- showcase and about

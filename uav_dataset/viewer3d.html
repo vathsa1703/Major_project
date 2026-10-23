@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en" data-theme="__THEME__">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3D flight</title>
+<!-- Template for dashboard_core.viewer3d_html(): __FLIGHT_JSON__ is replaced by the flight3d() data, __THEME__ by
+     light | dark | auto. The only external files are the two pinned three.js scripts below. -->
+<style>
+:root {
+  --bg: #eef1f4; --panel: rgba(255, 255, 255, 0.90); --text: #1d232b; --muted: #5b6573; --border: #d3d9e0;
+  --ground: #e4e8df; --grid: #c3c9bd; --grid-major: #98a091; --building: #9e9e9e; --served: #008300;
+  --unserved: #e34948; --inactive: #b4bac2; --drone: #2a78d6; --rotor: #1d4f91; --accent: #2a78d6;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1318; --panel: rgba(22, 27, 34, 0.90); --text: #e6ebf1; --muted: #9aa5b1; --border: #2c3540;
+  --ground: #1a1f25; --grid: #2a323b; --grid-major: #44505c; --building: #6d737a; --served: #3fbf5f;
+  --unserved: #ff6b6a; --inactive: #4a525c; --drone: #5aa2ff; --rotor: #9cc7ff; --accent: #5aa2ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1318; --panel: rgba(22, 27, 34, 0.90); --text: #e6ebf1; --muted: #9aa5b1; --border: #2c3540;
+    --ground: #1a1f25; --grid: #2a323b; --grid-major: #44505c; --building: #6d737a; --served: #3fbf5f;
+    --unserved: #ff6b6a; --inactive: #4a525c; --drone: #5aa2ff; --rotor: #9cc7ff; --accent: #5aa2ff;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font: 13px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+#wrap { position: relative; width: 100%; height: 100%; min-height: 420px; overflow: hidden; }
+#view { position: absolute; inset: 0 0 52px 0; }
+#view canvas { display: block; }
+.panel { position: absolute; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 10px; backdrop-filter: blur(4px); }
+#hud { top: 10px; left: 10px; min-width: 210px; }
+#hud .row { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
+#hud .row span:first-child { color: var(--muted); }
+#hud .big { font-size: 20px; font-weight: 650; }
+#legend { top: 10px; right: 10px; max-width: 240px; }
+#legend div { display: flex; align-items: center; gap: 7px; margin: 2px 0; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+.ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--text); display: inline-block; flex: none; }
+.sq { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
+.note { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+#bar { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; display: flex; align-items: center; gap: 10px;
+  padding: 0 12px; border-top: 1px solid var(--border); background: var(--panel); }
+#bar button, #bar select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+#bar button.primary { background: var(--accent); color: #ffffff; border-color: var(--accent); min-width: 74px; }
+#bar input[type=range] { flex: 1; min-width: 80px; accent-color: var(--accent); }
+#bar label { display: flex; align-items: center; gap: 5px; color: var(--muted); white-space: nowrap; }
+#tlabel { font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+#wind svg { vertical-align: middle; }
+#err { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center;
+  padding: 24px; color: var(--muted); }
+@media (max-width: 640px) {
+  #legend { display: none; }
+  #hud { min-width: 0; font-size: 12px; }
+  .opt { display: none !important; }
+}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="view"></div>
+  <div id="hud" class="panel">
+    <div class="row"><span>time</span><span id="h_t" class="big">0 s</span></div>
+    <div class="row"><span>people served</span><span id="h_cov">-</span></div>
+    <div class="row"><span>altitude</span><span id="h_alt">-</span></div>
+    <div class="row"><span>ground speed</span><span id="h_spd">-</span></div>
+    <div class="row"><span>tilt</span><span id="h_tilt">-</span></div>
+    <div class="row"><span>battery</span><span id="h_bat">-</span></div>
+    <div class="row" id="wind"><span>wind</span><span id="h_wind">-</span></div>
+  </div>
+  <div id="legend" class="panel">
+    <div><span class="dot" style="background: var(--served)"></span>served (good signal)</div>
+    <div><span class="dot" style="background: var(--unserved)"></span>not served</div>
+    <div id="lg_inactive"><span class="dot" style="background: var(--inactive)"></span>not counted now (other site)</div>
+    <div><span class="ring"></span>rescue user</div>
+    <div><span class="sq" style="background: var(--building)"></span>collapsed building</div>
+    <div><span class="sq" style="background: var(--drone)"></span>drone, trail, line to its ground spot</div>
+    <div class="note" id="scale_note"></div>
+  </div>
+  <div id="bar">
+    <button id="play" class="primary" type="button">Play</button>
+    <input id="slider" type="range" min="0" max="300" step="0.2" value="0" aria-label="time">
+    <span id="tlabel">0.0 s</span>
+    <label class="opt">speed <select id="speed"><option value="1">1x</option><option value="5">5x</option>
+      <option value="10" selected>10x</option><option value="30">30x</option></select></label>
+    <label class="opt"><input id="follow" type="checkbox"> follow drone</label>
+    <label class="opt">drone size <select id="dscale"><option value="1">x1 (true)</option>
+      <option value="10">x10</option><option value="20" selected>x20</option><option value="40">x40</option></select></label>
+  </div>
+  <div id="err"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script id="flight" type="application/json">__FLIGHT_JSON__</script>
+<script>
+(function () {
+  "use strict";
+  const D = JSON.parse(document.getElementById("flight").textContent);
+  const err = document.getElementById("err");
+  if (typeof THREE === "undefined" || typeof THREE.OrbitControls === "undefined") {
+    err.style.display = "flex";
+    err.textContent = "The 3D library (three.js from cdnjs / jsdelivr) could not be loaded. Check the internet " +
+      "connection; the flight data itself is computed locally.";
+    return;
+  }
+  const css = getComputedStyle(document.documentElement);
+  const col = (n) => new THREE.Color(css.getPropertyValue(n).trim());
+  const L = D.L, half = L / 2;
+  // world (east x, north y, up z) -> three.js (x right, y up, z toward the viewer): north points away from the camera
+  const W = (x, y, z) => new THREE.Vector3(x - half, z, half - y);
+
+  const view = document.getElementById("view");
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  renderer.setPixelRatio(dpr);
+  view.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = col("--bg");
+  const camera = new THREE.PerspectiveCamera(45, 1, 1, L * 12);
+  const HOME = [-0.05 * L, 0.80 * L, 1.15 * L];            // default camera: the whole map, seen from the south
+  camera.position.set(...HOME);
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0, 0);
+  controls.maxPolarAngle = Math.PI * 0.495;
+  controls.enableDamping = true;
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 0.75));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.55);
+  sun.position.set(-0.5 * L, L, 0.3 * L);
+  scene.add(sun);
+
+  // ground with a metre grid: thin lines every 100 m, strong lines every 500 m
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(L, L), new THREE.MeshLambertMaterial({ color: col("--ground") }));
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+  const g1 = new THREE.GridHelper(L, Math.round(L / 100), col("--grid"), col("--grid"));
+  g1.position.y = 0.3;
+  scene.add(g1);
+  const g2 = new THREE.GridHelper(L, Math.round(L / 500), col("--grid-major"), col("--grid-major"));
+  g2.position.y = 0.4;
+  scene.add(g2);
+
+  function textSprite(text, size) {
+    const c = document.createElement("canvas"), k = 2;
+    const ctx = c.getContext("2d");
+    ctx.font = `600 ${28 * k}px system-ui, sans-serif`;
+    c.width = Math.ceil(ctx.measureText(text).width) + 12 * k;
+    c.height = 40 * k;
+    ctx.font = `600 ${28 * k}px system-ui, sans-serif`;
+    ctx.fillStyle = css.getPropertyValue("--muted").trim();
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 6 * k, c.height / 2);
+    const tex = new THREE.CanvasTexture(c);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+    s.scale.set(size * c.width / c.height, size, 1);
+    return s;
+  }
+  const lab = (t, x, y, sz) => { const s = textSprite(t, sz || L * 0.03); s.position.copy(W(x, y, L * 0.012)); scene.add(s); };
+  lab("N", half, L * 1.04, L * 0.045);
+  lab("E", L * 1.04, half, L * 0.045);
+  lab("0 m", -L * 0.03, -L * 0.03);
+  lab(`${L} m east`, L, -L * 0.04);
+  lab(`${L} m north`, -L * 0.06, L);
+  lab("grid: 100 m", L * 0.1, -L * 0.04, L * 0.025);
+
+  // collapsed buildings (heights are for display only)
+  const bmat = new THREE.MeshLambertMaterial({ color: col("--building") });
+  for (const [x0, y0, x1, y1, h] of D.buildings) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, h, y1 - y0), bmat);
+    m.position.copy(W((x0 + x1) / 2, (y0 + y1) / 2, h / 2));
+    scene.add(m);
+  }
+
+  // survivors: one point each; rescue users also get a ring
+  const U = D.users, n = U.n_drawn;
+  U.frames.forEach((f, k) => { if (!f.xy) f.xy = U.frames[k - 1].xy; });   // positions are sent only when they change
+  const rescueIdx = [];
+  for (let i = 0; i < n; i++) if (U.rescue[i] === "1") rescueIdx.push(i);
+  const pos = new Float32Array(n * 3), clr = new Float32Array(n * 3);
+  const pgeo = new THREE.BufferGeometry();
+  pgeo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  pgeo.setAttribute("color", new THREE.BufferAttribute(clr, 3));
+  const dotTex = (() => {
+    const c = document.createElement("canvas"); c.width = c.height = 64;
+    const x = c.getContext("2d"); x.fillStyle = "#ffffff"; x.beginPath(); x.arc(32, 32, 28, 0, 2 * Math.PI); x.fill();
+    return new THREE.CanvasTexture(c);
+  })();
+  const ringTex = (() => {
+    const c = document.createElement("canvas"); c.width = c.height = 64;
+    const x = c.getContext("2d"); x.strokeStyle = "#ffffff"; x.lineWidth = 9;
+    x.beginPath(); x.arc(32, 32, 25, 0, 2 * Math.PI); x.stroke();
+    return new THREE.CanvasTexture(c);
+  })();
+  const pts = new THREE.Points(pgeo, new THREE.PointsMaterial({ size: 5 * dpr, sizeAttenuation: false,
+    vertexColors: true, map: dotTex, alphaTest: 0.5, transparent: true }));
+  scene.add(pts);
+  const rpos = new Float32Array(rescueIdx.length * 3), rclr = new Float32Array(rescueIdx.length * 3);
+  const rgeo = new THREE.BufferGeometry();
+  rgeo.setAttribute("position", new THREE.BufferAttribute(rpos, 3));
+  rgeo.setAttribute("color", new THREE.BufferAttribute(rclr, 3));
+  scene.add(new THREE.Points(rgeo, new THREE.PointsMaterial({ size: 13 * dpr, sizeAttenuation: false,
+    vertexColors: true, map: ringTex, alphaTest: 0.5, transparent: true })));
+  const C_SERVED = col("--served"), C_UNSERVED = col("--unserved"), C_INACTIVE = col("--inactive");
+  const C_TEXT = col("--text");
+  let shownFrame = -1;
+  function showUsers(k) {
+    if (k === shownFrame) return;
+    shownFrame = k;
+    const f = U.frames[k];
+    for (let i = 0; i < n; i++) {
+      const v = W(f.xy[2 * i], f.xy[2 * i + 1], 2.0);
+      pos[3 * i] = v.x; pos[3 * i + 1] = v.y; pos[3 * i + 2] = v.z;
+      const c = f.s[i] === "1" ? C_SERVED : (f.s[i] === "2" ? C_INACTIVE : C_UNSERVED);
+      clr[3 * i] = c.r; clr[3 * i + 1] = c.g; clr[3 * i + 2] = c.b;
+    }
+    rescueIdx.forEach((i, j) => {
+      rpos[3 * j] = pos[3 * i]; rpos[3 * j + 1] = pos[3 * i + 1] + 0.5; rpos[3 * j + 2] = pos[3 * i + 2];
+      const c = f.s[i] === "2" ? C_INACTIVE : C_TEXT;
+      rclr[3 * j] = c.r; rclr[3 * j + 1] = c.g; rclr[3 * j + 2] = c.b;
+    });
+    pgeo.attributes.position.needsUpdate = pgeo.attributes.color.needsUpdate = true;
+    rgeo.attributes.position.needsUpdate = rgeo.attributes.color.needsUpdate = true;
+  }
+  if (!U.frames.some((f) => f.s.indexOf("2") >= 0)) document.getElementById("lg_inactive").style.display = "none";
+
+  // the quadcopter: true size (arm, rotor radius from the model), drawn larger by the chosen factor
+  const Q = D.quad, drone = new THREE.Group();
+  const dmat = new THREE.MeshLambertMaterial({ color: col("--drone") });
+  const rmat = new THREE.MeshLambertMaterial({ color: col("--rotor"), transparent: true, opacity: 0.55 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.09, 0.26), dmat);
+  drone.add(body);
+  for (let k = 0; k < 4; k++) {
+    const a = k * Math.PI / 2;
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(Q.arm_m, 0.025, 0.035), dmat);
+    arm.position.set(Math.cos(a) * Q.arm_m / 2, 0, -Math.sin(a) * Q.arm_m / 2);
+    arm.rotation.y = a;
+    drone.add(arm);
+    const rotor = new THREE.Mesh(new THREE.CylinderGeometry(Q.rotor_r_m, Q.rotor_r_m, 0.012, 24), rmat);
+    rotor.position.set(Math.cos(a) * Q.arm_m, 0.05, -Math.sin(a) * Q.arm_m);
+    drone.add(rotor);
+  }
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 12), new THREE.MeshLambertMaterial({ color: col("--unserved") }));
+  nose.rotation.z = -Math.PI / 2;
+  nose.position.set(0.19, 0, 0);
+  drone.add(nose);                                     // the nose points to the drone's +x axis (yaw 0 = east)
+  drone.rotation.order = "YZX";
+  scene.add(drone);
+
+  // trail (5 Hz samples), line down to the ground spot, ring on the ground
+  const S = D.drone, ns = S.t.length;
+  const tpos = new Float32Array(ns * 3);
+  for (let i = 0; i < ns; i++) { const v = W(S.x[i], S.y[i], S.h[i]); tpos[3 * i] = v.x; tpos[3 * i + 1] = v.y; tpos[3 * i + 2] = v.z; }
+  const tgeo = new THREE.BufferGeometry();
+  tgeo.setAttribute("position", new THREE.BufferAttribute(tpos, 3));
+  scene.add(new THREE.Line(tgeo, new THREE.LineBasicMaterial({ color: col("--drone") })));
+  const dgeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  scene.add(new THREE.Line(dgeo, new THREE.LineBasicMaterial({ color: col("--drone"), transparent: true, opacity: 0.6 })));
+  const spot = new THREE.Mesh(new THREE.RingGeometry(L * 0.009, L * 0.012, 40),
+    new THREE.MeshBasicMaterial({ color: col("--drone"), side: THREE.DoubleSide }));
+  spot.rotation.x = -Math.PI / 2;
+  scene.add(spot);
+
+  // ---------------------------------------------------------------- time, HUD and controls
+  const tEnd = S.t[ns - 1];
+  const slider = document.getElementById("slider");
+  slider.max = tEnd.toFixed(1);
+  const playBtn = document.getElementById("play"), speedSel = document.getElementById("speed");
+  const followBox = document.getElementById("follow"), scaleSel = document.getElementById("dscale");
+  const $ = (id) => document.getElementById(id);
+  const scaleNote = () => { $("scale_note").textContent = `Drone drawn x${scaleSel.value} larger than life ` +
+    `(${(2 * (Q.arm_m + Q.rotor_r_m)).toFixed(1)} m across). Building heights are for display only.`; };
+  scaleNote();
+  let t = 0, playing = false, last = performance.now();
+  const lerp = (a, b, u) => a + (b - a) * u;
+  function angLerp(a, b, u) { let d = b - a; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return a + d * u; }
+  function frameIndex(time) { // latest user frame at or before `time`
+    let lo = 0, hi = U.frames.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (U.frames[mid].t <= time + 1e-6) lo = mid; else hi = mid - 1; }
+    return lo;
+  }
+  function update() {
+    const f = Math.min(t / S.dt, ns - 1), i = Math.floor(f), j = Math.min(i + 1, ns - 1), u = f - i;
+    const x = lerp(S.x[i], S.x[j], u), y = lerp(S.y[i], S.y[j], u), h = lerp(S.h[i], S.h[j], u);
+    const roll = lerp(S.roll[i], S.roll[j], u), pitch = lerp(S.pitch[i], S.pitch[j], u), yaw = angLerp(S.yaw[i], S.yaw[j], u);
+    const p = W(x, y, h);
+    drone.position.copy(p);
+    // ZYX Euler (yaw about up, pitch about north, roll about east) in three.js axes = order YZX with -pitch
+    drone.rotation.set(roll, yaw, -pitch, "YZX");
+    const sc = Number(scaleSel.value);
+    drone.scale.set(sc, sc, sc);
+    tgeo.setDrawRange(0, i + 1);
+    const g = W(x, y, 0.6);
+    dgeo.attributes.position.setXYZ(0, p.x, p.y, p.z);
+    dgeo.attributes.position.setXYZ(1, g.x, g.y, g.z);
+    dgeo.attributes.position.needsUpdate = true;
+    spot.position.copy(g);
+    showUsers(frameIndex(t));
+    if (followBox.checked) {
+      const d = p.clone().sub(controls.target);
+      controls.target.add(d); camera.position.add(d);
+    }
+    // HUD: per-second numbers (second k = the step that ends at k s)
+    const k = Math.max(0, Math.min(D.sec.t.length - 1, Math.ceil(t) - 1));
+    const vx = lerp(S.vx[i], S.vx[j], u), vy = lerp(S.vy[i], S.vy[j], u);
+    const wx = lerp(S.wx[i], S.wx[j], u), wy = lerp(S.wy[i], S.wy[j], u);
+    const tilt = Math.acos(Math.cos(roll) * Math.cos(pitch)) * 180 / Math.PI;
+    $("h_t").textContent = `${t.toFixed(1)} s`;
+    $("h_cov").textContent = t < 1 ? "-" : `${(100 * D.sec.coverage[k]).toFixed(0)}% (${D.sec.served[k]} of ${D.sec.n_active[k]})`;
+    $("h_alt").textContent = `${h.toFixed(1)} m`;
+    $("h_spd").textContent = `${Math.hypot(vx, vy).toFixed(1)} m/s (air ${Math.hypot(vx - wx, vy - wy).toFixed(1)})`;
+    $("h_tilt").textContent = `${tilt.toFixed(1)} deg (max ${Q.tilt_max_deg})`;
+    const bat = t < 1 ? D.battery_wh0 : D.sec.battery_wh[k];
+    $("h_bat").textContent = `${bat.toFixed(2)} Wh (${(100 * bat / D.battery_wh0).toFixed(0)}%)`;
+    const ws = Math.hypot(wx, wy), wd = Math.atan2(wy, wx) * 180 / Math.PI;
+    $("h_wind").innerHTML = ws < 0.05 ? "calm" : `<svg width="16" height="16" viewBox="-8 -8 16 16">` +
+      `<g transform="rotate(${(-wd).toFixed(0)})"><path d="M-6 0 H5 M1 -4 L6 0 L1 4" stroke="currentColor" ` +
+      `stroke-width="2" fill="none"/></g></svg> ${ws.toFixed(1)} m/s`;
+    slider.value = t.toFixed(1);
+    $("tlabel").textContent = `${t.toFixed(1)} s`;
+  }
+  playBtn.addEventListener("click", () => {
+    if (!playing && t >= tEnd) t = 0;
+    playing = !playing; playBtn.textContent = playing ? "Pause" : "Play"; last = performance.now();
+  });
+  slider.addEventListener("input", () => { t = Number(slider.value); update(); });
+  scaleSel.addEventListener("change", () => { scaleNote(); update(); });
+  followBox.addEventListener("change", () => {
+    if (followBox.checked) {               // jump close to the drone: a low view from the south, so the tilt shows
+      const p = drone.position.clone(), sc = Number(scaleSel.value);
+      const dist = Math.max(25, 4.5 * sc * 2 * (Q.arm_m + Q.rotor_r_m));
+      controls.target.copy(p); camera.position.copy(p.clone().add(new THREE.Vector3(-0.35, 0.3, 1).normalize().multiplyScalar(dist)));
+    } else { controls.target.set(0, 0, 0); camera.position.set(...HOME); }
+    update();
+  });
+  function resize() {
+    const w = view.clientWidth, h = view.clientHeight;
+    renderer.setSize(w, h, false);
+    renderer.domElement.style.width = w + "px"; renderer.domElement.style.height = h + "px";
+    camera.aspect = w / Math.max(1, h); camera.updateProjectionMatrix();
+  }
+  new ResizeObserver(resize).observe(view);
+  resize();
+  // optional start state from the URL hash, e.g. viewer.html#t=120&follow=1&scale=40 (handy for screenshots)
+  const hp = new URLSearchParams(location.hash.slice(1));
+  if (hp.has("scale") && [...scaleSel.options].some((o) => o.value === hp.get("scale"))) { scaleSel.value = hp.get("scale"); scaleNote(); }
+  if (hp.has("t")) t = Math.max(0, Math.min(tEnd, Number(hp.get("t")) || 0));
+  update();
+  if (hp.get("follow") === "1") { followBox.checked = true; followBox.dispatchEvent(new Event("change")); }
+  function loop(now) {
+    if (playing) {
+      t += (now - last) / 1000 * Number(speedSel.value);
+      if (t >= tEnd) { t = tEnd; playing = false; playBtn.textContent = "Play"; }
+      update();
+    }
+    last = now;
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -142,6 +142,66 @@ uav:
   az_max_mps2: 3.0              # vertical acceleration limit, m/s^2, used only when a_max_mps2 is set
                                 # (ENGINEERING ASSUMPTION; sensitivity {2, 4})
 
+# Stage 5 (roadmap): a simulated quadcopter that really flies (OUR OWN model in plain Python/NumPy: quadsim.py).
+# OFF by default: with enabled false (and UAVEnv(dynamics=None)) the env is the old point-mass game, bit for bit.
+# On (enabled: true or UAVEnv(dynamics="quad")), every pilot's velocity command becomes the velocity SETPOINT of an
+# autopilot (like ArduPilot GUIDED velocity / PX4 offboard velocity) flying a rigid-body quadrotor through each 1 s step.
+# Mass = energy.weight_n / energy.g_mps2 = 2.04 kg. Values marked "ArduPilot default" / "PX4 default" are quoted FROM
+# MEMORY of those autopilots' parameter lists and are NOT VERIFIED against their documentation. Range = sensitivity range.
+quad:
+  enabled: false
+  dt_s: 0.01                    # integration step, s (100 Hz). ENGINEERING CHOICE; range 0.005-0.02 (test: 0.005 agrees)
+  sample_every_s: 0.2           # flight log for the 3D view, s (5 Hz). Display only
+  # airframe
+  thrust_to_weight: 2.0         # max total thrust / weight. ENGINEERING ASSUMPTION; range 1.5-3
+  min_thrust_frac: 0.1          # min total thrust / weight (motors never stop). ENGINEERING ASSUMPTION; range 0-0.2
+  arm_m: 0.35                   # centre-to-rotor distance, m: four 0.2 m-radius rotors (total disc area = energy.A_m2,
+                                # 0.503 m2) that do not overlap. ENGINEERING ASSUMPTION; range 0.25-0.45
+  inertia_kg_m2: [0.03, 0.03, 0.06]   # Ixx, Iyy, Izz: 4 x 0.1 kg motors at arm_m + a compact body.
+                                # ENGINEERING ASSUMPTION; range x0.5 - x2
+  yaw_torque_m: 0.016           # rotor drag torque per newton of thrust, m. ENGINEERING ASSUMPTION; range 0.01-0.03
+  motor_tau_s: 0.05             # first-order lag of thrust and torques, s. ENGINEERING ASSUMPTION; range 0.02-0.1
+  drag_lin_n_s_m: 0.2           # rotor (blade-flapping) drag, linear in airspeed, N s/m. ENGINEERING ASSUMPTION;
+                                # range 0.05-0.5. The QUADRATIC drag is not a parameter: 0.5 d0 rho s A from `energy:`
+                                # (0.0092 N s2/m2), the same fuselage drag as Zeng's parasite power
+  # autopilot (cascade: setpoint shaping -> position/velocity PI -> thrust vector + tilt limit -> attitude P -> rate P)
+  tilt_max_deg: 30.0            # max tilt, deg. ArduPilot ANGLE_MAX default (30 deg); range 20-45
+  rate_max_dps: 220.0           # max body rate, deg/s. PX4 MC_ROLLRATE_MAX default; range 90-360
+  ang_p: [4.5, 4.5, 4.5]        # attitude P (roll, pitch, yaw), 1/s. ArduPilot ATC_ANG_RLL/PIT/YAW_P defaults; range 3-9
+  rate_ff: true                 # shape the attitude target (sqrt controller, accel-limited) and feed its rate forward.
+                                # ArduPilot ATC_RATE_FF_ENAB default (on); false = P-only attitude loop (slower, more
+                                # overshoot)
+  ang_acc_max_dps2: 1100.0      # attitude-target angular acceleration limit, deg/s2. ArduPilot ATC_ACCEL_R_MAX /
+                                # ATC_ACCEL_P_MAX default (110000 cdeg/s2); range 300-1800
+  rate_p: 20.0                 # rate-loop bandwidth, 1/s (stands for the rate PID). ENGINEERING ASSUMPTION; range 10-40
+  pos_p_xy: 1.0                 # horizontal position P, 1/s. ArduPilot PSC_POSXY_P default; range 0.5-2
+  vel_p_xy: 2.0                 # horizontal velocity P, (m/s2)/(m/s). ArduPilot PSC_VELXY_P default; range 1-4
+  vel_i_xy: 1.0                 # horizontal velocity I, (m/s2)/m. ArduPilot PSC_VELXY_I default; range 0.2-2
+  vel_i_max_xy_mps2: 3.0        # horizontal integrator clamp, m/s2. ENGINEERING ASSUMPTION; range 2-5
+  pos_p_z: 1.0                  # vertical position P, 1/s. ArduPilot PSC_POSZ_P default; range 0.5-2
+  vel_p_z: 5.0                  # vertical velocity P, (m/s2)/(m/s). ArduPilot PSC_VELZ_P default; range 3-8
+  vel_i_z: 2.0                  # vertical velocity I, (m/s2)/m. ENGINEERING ASSUMPTION (ArduPilot integrates in its
+                                # vertical acceleration loop instead); range 0.5-4
+  vel_i_max_z_mps2: 3.0         # vertical integrator clamp, m/s2. ENGINEERING ASSUMPTION; range 2-5
+  leash_xy_m: 10.0              # max distance the shaped target may run ahead horizontally, m. ENGINEERING ASSUMPTION
+  leash_z_m: 5.0                # the same vertically, m. ENGINEERING ASSUMPTION
+  shape_acc_xy_mps2: 4.0        # setpoint shaping: horizontal acceleration of the target, m/s2. ENGINEERING ASSUMPTION:
+                                # = the project's G5 a_max (D-44/D-48); ArduPilot's WPNAV_ACCEL default is 2.5; range 2.5-5
+  shape_acc_z_mps2: 3.0         # the same vertically, m/s2 (= uav.az_max_mps2). ENGINEERING ASSUMPTION; range 2-4
+  shape_jerk_xy_mps3: 5.0       # setpoint shaping: horizontal jerk limit, m/s3. ArduPilot PSC_JERK_XY default; range 2-20
+  shape_jerk_z_mps3: 5.0        # the same vertically, m/s3. ArduPilot PSC_JERK_Z default; range 2-20
+  # wind: mean vector + gusts (first-order Gauss-Markov per axis, "Dryden-lite"; seeded per scenario). Default = calm.
+  wind:
+    mean_mps: 0.0               # mean wind speed, m/s
+    dir_deg: 0.0                # direction the wind blows TOWARD, deg counter-clockwise from east
+    gust_std_mps: 0.0           # horizontal gust standard deviation, m/s
+    gust_std_z_mps: 0.0         # vertical gust standard deviation, m/s
+    gust_tau_s: 5.0             # gust correlation time, s. ENGINEERING ASSUMPTION (Dryden L/V at 150 m is ~10-30 s);
+                                # range 2-30
+  # "wind on" preset (sim-to-sim experiment and the dashboard's wind switch). ENGINEERING ASSUMPTION: a moderate breeze
+  # (Beaufort 3, 3.4-5.4 m/s) with turbulence intensity ~0.2; ranges: mean 0-10 m/s, gust std 0.5-2 m/s
+  wind_on: {mean_mps: 5.0, dir_deg: 30.0, gust_std_mps: 1.0, gust_std_z_mps: 0.5}
+
 # Gymnasium env (Phase 5)
 env:
   grid: 10                      # NxN user-density heatmap
