@@ -32,7 +32,7 @@ uav_dataset/
   access_benchmark.py    the four access schemes at each scheme's best spot (one snapshot)
   altitude_by_class.py   Gate G2 diagnostic (best altitude per user class)
   mobility_check.py      H1 check (fixed drone vs best position over time)
-  test_*.py              343 tests
+  test_*.py              399 tests
 ```
 Not committed: `uav_dataset/data/`, `data_v1/`, `results/`, logs, Excel files, `docs/papers/` (local copies of papers).
 
@@ -56,7 +56,7 @@ deletion; admin enforcement off.
 Lint rules: ruff E, F, W, I, B with line length 120; E741, E702 and E731 ignored (single-letter names, `a; b` and short lambdas
 are normal in the math code).
 
-## 9.4 Tests (343 on 2026-10-22)
+## 9.4 Tests (399 on 2026-10-23)
 | File | Tests | Covers |
 |---|---|---|
 | `test_noma.py` | 9 | gain vs distance, rate vs power, power split, SIC check (forced failure), pairing, scenario variety, class mix |

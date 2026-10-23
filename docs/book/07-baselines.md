@@ -398,3 +398,29 @@ no safety margin), not changed because the rule was fixed in advance.
 
 **Reproduce:** `python sites_exp.py phase1`, `python sites_exp.py headroom`, `python sites_exp.py report`.
 
+## 7.13 Confirmation on fresh scenarios, and a forecasting pilot (D-52 phases 3-4, 2026-10-22)
+**What was added.** B6fc, a **forecasting** pilot: every 10 s it scores each candidate spot by the coverage it would give when
+the drone *arrives* there (real flight time, braking included) and for the following minute, using only what could be
+observed: where people are now, how they moved in the last second and, in "announced" designs, the operator's message
+(when the switch happens, from which site to which, how many people). Tests show it never reads the future (scrambling the
+future positions changes nothing) and equals B6 when nothing moves. 17 tests.
+
+**Fresh scenarios 1000-1019** (20 per design, never used before; owner's G5 settings; room = pilot told the future minus the
+best simple pilot; pass mark 0.02):
+
+| Sites apart | Sudden switch | Over 1 min | Over 3 min |
+|---|---|---|---|
+| 1.0 km | 0.016 / 0.013 ✗ | 0.005 / 0.005 ✗ | 0.004 / 0.004 ✗ |
+| 1.5 km | **0.056 / 0.038 ✓** | **0.029 / 0.029 ✓** | 0.012 / 0.012 ✗ |
+| 2.0 km | **0.091 / 0.046 ✓** | **0.071 / 0.047 ✓** | **0.029 / 0.029 ✓** |
+
+(first number: bar without the announcement; second: bar including the forecasting pilot that uses it.)
+**5 of 9 designs are confirmed**; two that passed on the design scenarios (1.0 km sudden, 1.5 km over 3 min) are not, which is
+why the rules required fresh scenarios. With a 13 Wh battery only the two 2 km designs (sudden, 1 min) keep room.
+
+**What the forecasting pilot shows.** With the announcement it captures 36-52% of the room in the sudden and 1-minute designs,
+but in slow 3-minute switches it does *worse* than plain B6, because it flies to the new site too early. A fifth review
+round confirmed there is no leak and that this is a flaw of its scoring rule; a departure-time version (B6dep: stay until the
+best moment, then fly) narrowed the 1.5 km designs below 0.02 on 4 scenarios, leaving **the 2 km designs as the clear place
+where an AI could win** (+0.04 to +0.09). Run time: about 85 s per scenario; three processes in parallel; results identical
+to a single-process run (checked on 3 rows). Reproduce: `python sites_exp.py confirm --shard k/3`, `merge`, `report`.
