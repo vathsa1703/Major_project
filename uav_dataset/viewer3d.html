@@ -187,17 +187,20 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     const lo = col("--roof-lo"), hi = col("--roof-hi"), tmp = new THREE.Color();
     const push = (a, c) => { vtx.push(a.x, a.y, a.z); vcol.push(c.r, c.g, c.b); };
     for (const b of P.polys) {
-      const h = b[0], k = (b.length - 1) / 2;
+      const h = b[0], k = Math.floor((b.length - 1) / 2);
       if (k < 3) continue;
       tmp.copy(lo).lerp(hi, Math.min(1, h / (P.h_ref || 30)));
       const ring = [];
       for (let i = 0; i < k; i++) ring.push(new THREE.Vector2(b[1 + 2 * i], b[2 + 2 * i]));
+      if (ring.length > 3 && ring[0].equals(ring[ring.length - 1])) ring.pop();   // OSM rings repeat the first corner
+      if (ring.length < 3) continue;
       for (const [a, c, d] of THREE.ShapeUtils.triangulateShape(ring, [])) {      // roof
         push(W(ring[a].x, ring[a].y, h), tmp); push(W(ring[c].x, ring[c].y, h), tmp); push(W(ring[d].x, ring[d].y, h), tmp);
       }
       const wall = tmp.clone().multiplyScalar(0.82);
-      for (let i = 0; i < k; i++) {                                                    // walls
-        const p = ring[i], q = ring[(i + 1) % k];
+      const n = ring.length;
+      for (let i = 0; i < n; i++) {                                                    // walls
+        const p = ring[i], q = ring[(i + 1) % n];
         const a0 = W(p.x, p.y, 0), a1 = W(p.x, p.y, h), b0 = W(q.x, q.y, 0), b1 = W(q.x, q.y, h);
         push(a0, wall); push(b0, wall); push(b1, wall); push(a0, wall); push(b1, wall); push(a1, wall);
       }
