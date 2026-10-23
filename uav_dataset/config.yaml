@@ -232,6 +232,16 @@ baselines:
   # B3obs / B3obsU / B3obsUO (information ladder): B3's search, but scored on a pseudo-crowd rebuilt from the maps.
   obs_pseudo_users: 500         # ENGINEERING ASSUMPTION: crowd size they assume (mean of n_users_choices; must be even)
 
+# Value of information (contribution 2, docs/prereg/value_of_info.md; baselines.ReportsView, pilots B6rep / B3rep):
+# the planner sees the users only through phone GPS reports. Defaults = full information (B6rep == B6, bit for bit).
+# Pilots override these per run, e.g. "B6rep:f=0.2,sigma=10,age=30". Used by no other pilot and no default.
+voi:
+  f: 1.0                        # share of phones that report (fixed per user and episode); 1/f is assumed known
+  sigma_m: 0.0                  # GPS error std per axis, m (2-D Gaussian, a fresh draw per report). ENGINEERING
+                                # ASSUMPTION for the scale: consumer GPS ~5-10 m open sky, tens of m in rubble/urban canyons
+  age_s: 0                      # reporting interval, s (each phone reports at its own phase, and once on attach)
+  rng_stream: 7100              # rng key (scenario, 7100, rep, k): k 0 = who reports, 1 = report phases, 2 = GPS errors
+
 # B6fc, the forecasting greedy pilot (D-52 phase 3; baselines.B6Forecast). Every K steps it scores B6's candidates by
 # the mean coverage over [arrival, arrival + window_s] for a FORECAST of the active users (velocity extrapolation from the
 # last frame; in announced competing-sites cells also the announced A -> B move). Used by no other pilot and no default.

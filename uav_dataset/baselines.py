@@ -715,11 +715,162 @@ class B5EnergyAware(Policy):
             self.target = (env.x, env.y, BCFG["altitude_m"])             # stay where we are
 
 
+# ---------------------------------------------------------------- value of information: planners fed by phone reports
+class ReportsView:
+    """What a planner knows when the users' positions come only from their phones' GPS reports (contribution 2,
+    docs/prereg/value_of_info.md). Pure NumPy; reads the env's true users but never changes the env.
+    Towers are down, so the drone IS the network: an attached phone can send its GPS position (emergency-location
+    reporting), but only some phones do, with GPS error, and only every few seconds.
+      f       share of phones that report. Fixed per user and episode: user u reports iff U_u < f, U_u ~ U[0, 1) seeded
+              by (scenario, voi.rng_stream, rep), so the reporters at a smaller f are a subset of those at a larger f.
+      sigma_m GPS error: every report gets its own 2-D Gaussian error, std sigma_m per axis (E[t, u] = sigma_m Z[t, u],
+              Z standard normal, seeded once per episode, so every sigma uses the same Z); the reported position is
+              clipped to the map.
+      age_s   reporting interval (whole seconds): phone u reports at the times phase_u + k age_s (phase_u uniform
+              in {0, ..., age_s - 1}, seeded: phones are not synchronised), and once on attach (its first active
+              second; t = 0 for everyone in non-sites scenarios). The planner sees each phone's LAST report: age of
+              information in [0, age_s). age_s = 0: every phone reports every second (the planner sees now).
+    Belief at time t = the reporting phones whose last report (time t_r <= t) was sent while they were attached
+    (active at t_r), at their reported position (true position at t_r + error), with their own class and min rate
+    (they are in the report). A phone that has left since (competing sites: a mover deactivates) stays in the belief
+    at its stale position until its next scheduled report. Unreported users are INVISIBLE. In competing sites a mover
+    and its reserve twin at B are separate entries with separate report draws (re-attach = a new phone; expected
+    reporter share stays f).
+    Count scaling (f < 1; f is assumed known): k visible reporters stand for n_hat = round(k / f) users (rounded up
+    to even: NOMA pairs). The n_hat - k extra pseudo-users sit at the reporters' reported positions (copies split
+    evenly over the reporters, largest remainder, deterministic) and get classes from the config class mix
+    (explicit_classes: counts by largest remainder, interleaved along the list), because their classes are unknown.
+    f = 1, sigma_m = 0, age_s = 0 gives exactly env.users_now() (same users, order, values): B6rep == B6, bit for
+    bit."""
+
+    def __init__(self, env, f=None, sigma_m=None, age_s=None, rep=0):
+        c = md.CFG["voi"]
+        self.env = env
+        self.f = float(c["f"] if f is None else f)
+        self.sigma = float(c["sigma_m"] if sigma_m is None else sigma_m)
+        age = float(c["age_s"] if age_s is None else age_s)
+        assert 0.0 < self.f <= 1.0, f"report share f must be in (0, 1], not {self.f}"
+        assert self.sigma >= 0.0, "sigma_m must be >= 0"
+        assert age >= 0 and age == int(age), "age_s must be a whole number of seconds >= 0"
+        self.age = int(age)
+        n = env.P.shape[1]
+        key = [env.scenario_seed, int(c["rng_stream"]), int(rep)]
+        self.reports = np.random.default_rng(key + [0]).uniform(size=n) < self.f
+        ph = np.random.default_rng(key + [1]).uniform(size=n)
+        self.phase = np.floor(ph * self.age).astype(int) if self.age > 0 else np.zeros(n, int)
+        self.z = np.random.default_rng(key + [2]).standard_normal(size=env.P.shape) if self.sigma > 0 else None
+        if env.active is None:
+            self.first = np.zeros(n, int)
+        else:                                       # first active second (never active -> after the episode)
+            self.first = np.where(env.active.any(axis=0), np.argmax(env.active, axis=0), env.P.shape[0])
+        names = list(md.CFG["classes"])
+        mix = np.array([md.CFG["classes"][k]["share"] for k in names], dtype=float)
+        self.mix = mix / mix.sum()
+        self.class_rate = np.array([md.CFG["classes"][k]["min_rate_bps"] for k in names], dtype=float)
+        self.rescue_idx = names.index("rescue")
+
+    def last_report(self, t):
+        """Time index of every phone's last report at or before t (attach report included)."""
+        n = len(self.reports)
+        tr = np.full(n, int(t)) if self.age == 0 else t - np.mod(t - self.phase, self.age)
+        return np.maximum(tr, self.first)
+
+    def visible(self, t=None):
+        """(indices, report times) of the users the planner sees at time index t (default now)."""
+        env = self.env
+        t = env.t if t is None else int(t)
+        tr = self.last_report(t)
+        ok = self.reports & (self.first <= t)
+        if env.active is not None:
+            ok &= env.active[np.minimum(tr, env.P.shape[0] - 1), np.arange(len(tr))]
+        idx = np.flatnonzero(ok)
+        return idx, tr[idx]
+
+    def belief(self, t=None):
+        """(xy (k, 2), min_rate (k,), rescue (k,)) of the planner's belief at time index t (default now)."""
+        env = self.env
+        idx, tr = self.visible(t)
+        xy = env.P[tr, idx]
+        if self.sigma > 0:
+            xy = np.clip(xy + self.sigma * self.z[tr, idx], 0.0, env.L)
+        mr, rs = env.min_rate[idx], env.rescue[idx]
+        k = len(idx)
+        if self.f < 1.0 and k > 0:
+            n_hat = int(round(k / self.f))
+            n_hat += n_hat % 2
+            n_fill = n_hat - k
+            if n_fill > 0:
+                copies = allocate(np.ones(k), n_fill)
+                cls = explicit_classes(np.tile(self.mix, (n_fill, 1)))
+                xy = np.vstack([xy, np.repeat(xy, copies, axis=0)])
+                mr = np.concatenate([mr, self.class_rate[cls]])
+                rs = np.concatenate([rs, cls == self.rescue_idx])
+        return xy, mr, rs
+
+
+def belief_coverage(env, view, X, Y, H, p_w):
+    """Coverage the planner EXPECTS at the candidates, computed with env.evaluate's physics on its belief (zeros if the
+    belief holds fewer than 2 users: nothing to plan on, the pilot then stays where it is)."""
+    xy, mr, rs = view.belief()
+    if len(xy) < 2:
+        return np.zeros(len(np.atleast_1d(X)))
+    return env.evaluate_users(xy, mr, rs, X, Y, H, p_w, env.t)
+
+
+class _Reports:
+    """Mixin: a planner that sees the users only through phone reports (ReportsView). Parameters from config `voi:`
+    unless given."""
+
+    def __init__(self, f=None, sigma_m=None, age_s=None, rep=0):
+        self.voi = dict(f=f, sigma_m=sigma_m, age_s=age_s, rep=rep)
+
+    def reset(self, env):
+        super().reset(env)
+        self.view = ReportsView(env, **self.voi)
+
+
+class B6Reports(_Reports, B6GridAltitude):
+    """B6rep: B6's search (grid x altitude levels + 'stay', every K steps, ties to the closest), scored on the belief
+    built from phone reports instead of the true users. The drone still serves the TRUE users (env.step unchanged)."""
+    name = "B6rep"
+
+    def plan(self, env):
+        CX, CY, CH = self.candidates(env)
+        cov = belief_coverage(env, self.view, CX, CY, CH, env.p_max_w * self.power)
+        j = self.pick(env, cov, CX, CY, CH)
+        self.target = (CX[j], CY[j], CH[j])
+
+
+class B3Reports(_Reports, B3GridSearch):
+    """B3rep: B3's search (grid at the fixed altitude + the current spot), scored on the phone-report belief."""
+    name = "B3rep"
+
+    def score(self, env, X, Y, H, p_w):
+        return belief_coverage(env, self.view, X, Y, H, p_w)
+
+
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
             "B6": B6GridAltitude, "B7": B7Loiter, "B8": B8BatteryAware, "B6fc": B6Forecast,
             "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles,
             "B3obsN": B3ObsN, "B3obsUN": B3ObsUncappedN}
+# Parametrised pilots, NOT in POLICIES (so no default run list changes). Name them as "B6rep:f=0.2,sigma=10,age=30".
+REP_POLICIES = {"B6rep": B6Reports, "B3rep": B3Reports}
+
+
+def parse_rep(name):
+    """'B6rep:f=0.2,sigma=10,age=30[,rep=0]' -> (class, kwargs). Missing keys come from config `voi:`."""
+    base, _, args = name.partition(":")
+    keys = {"f": "f", "sigma": "sigma_m", "age": "age_s", "rep": "rep"}
+    kw = {}
+    for a in filter(None, args.split(",")):
+        k, v = a.split("=")
+        assert k in keys, f"unknown report parameter {k!r} in {name!r}; use f, sigma, age, rep"
+        kw[keys[k]] = int(v) if k == "rep" else float(v)
+    return REP_POLICIES[base], kw
 
 
 def make_policy(name):
+    if name.partition(":")[0] in REP_POLICIES:
+        cls, kw = parse_rep(name)
+        return cls(**kw)
     return POLICIES[name]()
