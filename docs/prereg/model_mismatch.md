@@ -1,8 +1,15 @@
-# Pre-registration (DRAFT): can an AI beat model-based pilots when the true channel differs from the textbook model?
+# Pre-registration: can an AI beat model-based pilots when the true channel differs from the textbook model?
 
-Status: **DRAFT, not yet agreed.** Written before any AI training. Reviewer amendments of 2026-10-23 (lead message) are
-included. To be committed as final, unchanged in substance, when the lead/owner gives the GO; any later change is
-recorded as a dated amendment below, never by editing the text above it.
+Status: **FINAL, committed 2026-10-23 before any AI training** (lead's GO of 2026-10-23, with conditions). Reviewer
+amendments of 2026-10-23 are included. Any later change is recorded as a dated amendment at the end, never by editing
+the text above it.
+
+> **READ FIRST: the pre-registered 9-cell mismatch grid was NULL.** No cell of the pre-registered room-test grid
+> (shadowing sigma {4, 8} x correlation {25, 50, 150} m, building loss 25 dB, hidden buildings {2, 4}) reached the room
+> criterion (largest +0.017). `mm_h8` and `mm_combo` are **EXPLORATORY cells added AFTER seeing that null**; their room
+> was confirmed on fresh seeds 1000-1019 before any training. **Any verdict on them is EXPLORATORY, not a
+> pre-registered pass.** Expected outcome, written down before training: the AI most likely FAILS (room 0.026-0.036 is
+> smaller than the known learning gap of about 0.08, section 8).
 
 ## 1. Question and hypothesis
 
@@ -26,9 +33,10 @@ and might beat model-based pilots. Hypothesis H-MM: in at least one mismatch cel
   null, two LARGER-DOSE cells were added (exploratory, labelled so everywhere): `mm_h8` (8 hidden buildings) and
   `mm_combo` (shadowing 8 dB / 150 m + true building loss 25 dB + 4 hidden buildings). Both pass on val (+0.036, +0.035)
   and again on FRESH seeds 1000-1019 (mm_h8 +0.026 [+0.012, +0.041]; mm_combo +0.033 [+0.020, +0.046]).
-- **Proposed training cells: `mm_combo` and `mm_h8`, plus the negative control `mm_none`** (no mismatch). Disclosed:
-  these cells were chosen after the pre-registered grid gave a null; their room was confirmed on fresh seeds before any
-  training.
+- **Training cells: `mm_combo` and `mm_h8` (EXPLORATORY), plus the negative control `mm_none`** (no mismatch).
+  These cells were chosen after the pre-registered grid gave a null; their room was confirmed on fresh seeds before any
+  training. The rules below are fixed now, but a "pass" in these cells is an exploratory finding that needs a new
+  pre-registered confirmation before it can be called a result.
 
 ## 3. Room criterion (already measured, before training)
 
@@ -53,7 +61,8 @@ Room = B6true - per-scenario best of (B6, B6meas), paired over val seeds 100-119
   coverage last second and in the own history; NO shadowing map, no true building loss, no hidden buildings), CNN
   extractor, decisions held 10 s, gamma 0.95, reward v1 (coverage), 150,000 decisions (the E0 budget), fresh training
   scenarios 10000-19999 (never val or test seeds; the shadowing map, hidden buildings are re-drawn per scenario seed).
-- Steering: **`gotoz`** (where + altitude) proposed; see section 9, question 1. E0 used `goto`.
+- Steering: **`gotoz`** (where + altitude), accepted by the lead before training (section 9, question 1). E0 used
+  `goto`.
 - 3 training seeds (0, 1, 2) per cell. Kaggle, one notebook per cell (3 notebooks: mm_combo, mm_h8, mm_none), 3 seeds in
   parallel; kernels `srivathsajr/uav-mismatch-mm-<cell>`; code = commit 4075bcd of `origin/final/integrate` + the
   changed files embedded in run.py (sha256 checked on Kaggle and recorded in run_info.json).
@@ -61,7 +70,7 @@ Room = B6true - per-scenario best of (B6, B6meas), paired over val seeds 100-119
 ## 6. Bar and pass mark
 
 - Level-1 bar = per scenario, the best of B6, B6meas and B3 (all at most level-1 information).
-- **AI pass (per cell):** the agent's 3-seed mean (averaged per scenario) beats the bar on val 100-119: paired mean
+- **AI pass (per cell; EXPLORATORY in these cells):** the agent's 3-seed mean (averaged per scenario) beats the bar on val 100-119: paired mean
   difference > 0 with the two-sided paired p-value (normal approximation, `evalstats.paired_p`) Holm-corrected over the
   training cells (`mm_combo`, `mm_h8`; the negative control is not in the family) below 0.05, in at least one cell.
 - **Negative control:** on `mm_none` the AI must NOT beat B6; if it does, look for a bug before reading any other cell.
@@ -85,13 +94,15 @@ cells, summary table). Statistics: `evalstats.paired_diff` (normal 95% CI), `pai
   so the expected outcome is that the AI does NOT pass; the informative numbers are the share of room captured and
   whether the AI's deficit to the bar is smaller in `mm_combo` / `mm_h8` than in `mm_none`.
 
-## 9. Open questions for the reviewer / owner (before GO)
+## 9. Questions settled before the GO
 
 1. Steering: E0 used `goto` (fixed 150 m altitude). In `mm_*` B6 picks the 300 m ceiling in 20/20 val scenarios (both
    `mm_none` and `mm_combo`; B6true in 15/20 on `mm_combo`), and a fixed 150 m pilot (B3) is 0.06 below B6, so `goto`
    would cap the agent below the bar by construction. Proposal: `gotoz` (where + altitude), same budget (150,000
-   decisions; the laptop smoke run trained at 23 decisions/s, about 1.8 h per run).
-2. Optional hybrid (D-56 style): B6meas decides, the AI learns only a correction; disclosed as a hybrid. Not prepared.
+   decisions; the laptop smoke run trained at 23 decisions/s, about 1.8 h per run). **Decided: `gotoz` (lead,
+   2026-10-23, before training).**
+2. Optional hybrid (D-56 style): B6meas decides, the AI learns only a correction; disclosed as a hybrid. Not part of
+   this pre-registration.
 
 ## Amendments
 
