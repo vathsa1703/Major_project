@@ -94,3 +94,8 @@ read the countdown.
   200 instead of 300 scenarios, verdict on the 3-seed mean with the same pass mark, 2 more seeds only if Round A beats
   the bar (then the 5-seed result is reported). Training runs on Kaggle, one kernel per cell (tables of the pool built
   in 4 processes, then 3 runs in parallel).
+- 2026-10-24 (after Round A): Round A did not meet the pass mark in either cell (results:
+  `uav_dataset/results/hybrid/summary.md`), so by section 3 Round B (seeds 3, 4) is not run and the 3-seed result is
+  final. Deviations from the text above: none. B6dep was not in `baselines.POLICIES` at evaluation time, so the bar is
+  B6, B7, B8, B6fc; their val rows were copied from G5 round 1 (`results/g5/r1_*/episodes.csv`), and the hybrid pilot
+  that never leaves reproduced the copied B6 rows exactly on all 40 scenarios.

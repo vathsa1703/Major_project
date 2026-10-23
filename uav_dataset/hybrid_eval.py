@@ -190,7 +190,7 @@ def cell_summary(df, profile):
         d, h = paired_diff(mean_agent, bar)
         p = paired_p(mean_agent, bar)
         res = dict(diff=d, ci=h, p=p, n_agents=len(agents))
-        L += ["", f"**5-seed mean** (per scenario, mean over the {len(agents)} agents): {mean_agent.mean():.3f}; "
+        L += ["", f"**{len(agents)}-seed mean** (per scenario, mean over the agents): {mean_agent.mean():.3f}; "
                   f"vs bar {d:+.3f} +/- {h:.3f} (p = {p:.3g}); vs B6 {fmt(paired_diff(mean_agent, piv['B6']))}."]
         if "dp" in piv:
             room = piv["dp"].mean() - bar.mean()
@@ -228,8 +228,8 @@ def report(out):
         names = list(res)
         adj = holm([res[n]["p"] for n in names])
         lines += ["### Pre-registered pass mark", "",
-                  "Pass = in at least one cell the 5-seed mean beats the bar: mean paired difference > 0 and "
-                  "Holm-adjusted p < 0.05 over the 2 cells.", "",
+                  "Pass = in at least one cell the seed mean (Round A: 3 seeds) beats the bar: mean paired "
+                  "difference > 0 and Holm-adjusted p < 0.05 over the 2 cells.", "",
                   "| cell | agent - bar | p | Holm p | passes |", "|---|---|---|---|---|"]
         ok = []
         for n, p in zip(names, adj, strict=True):
