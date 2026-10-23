@@ -33,7 +33,7 @@ experiments that are not finished. Wording rule: "simulation-based planning tool
 - One physics engine: crowds, movement, buildings, the Al-Hourani channel, NOMA and OMA, the Zeng-Xu-Zhang energy model.
 - One "game" (Gymnasium environment) that every pilot plays: simple pilots, the AI, a clairvoyant planner, a dashboard, a 3D
   quadcopter.
-- 343 automated tests at the last book update (399 collected now), CI on every change, seeded scenarios.
+- 399 automated tests, CI on every change, seeded scenarios.
 - **Figure:** the architecture diagram (report Figure 3.1; rendered PNG is produced in `docs/report/build/diagram_1.png` by
   `build_report.py`).
 - **Speaker notes:** "Everything calls the same code, so the dashboard, the experiments and the AI can never disagree. Every
@@ -68,7 +68,7 @@ experiments that are not finished. Wording rule: "simulation-based planning tool
 - In the rotary-wing energy model, flying at about 10 m/s costs less than hovering (126 W vs 168 W).
 - Circling the best spot (B7) serves 25.6% more people per battery; with 12-13 Wh it finishes the mission while a hovering drone
   dies (+0.08 to +0.12 coverage). Robust to the uncertain energy numbers (+21% to +31%).
-- **Figure:** none in the book yet [PENDING: a bar chart of Table 5.4]; show the table.
+- **Figure:** `docs/report/figures/circling_vs_hovering.png` (report Figure 5.12).
 - **Speaker notes:** "Like a helicopter, a drone gets free lift from moving forward. So instead of hovering, our pilot flies
   small circles. Same coverage while flying, but a quarter more service per battery charge."
 
@@ -86,10 +86,11 @@ experiments that are not finished. Wording rule: "simulation-based planning tool
 - A clairvoyant pilot that knows the future: on walking crowds it beats the simple pilot by only +0.002. No AI can win there.
 - Redesigned scenarios (demand jumps between sites 1-2 km apart): room up to +0.108; room appears when the flight across takes
   as long as the switch.
+- Confirmed on 20 fresh scenarios per design: room in 5 of 9 designs, clearly only at 2 km (+0.04 to +0.09).
 - G5 round 1 on the 2 km sites: all 8 agents below the bar (best 0.680 vs 0.756 / 0.753); NOMA still +8 to +13 people per 100
-  over OMA for the same agent.
-- [PENDING: anticipation rule, hybrid timing AI].
-- **Figure:** none in the book yet [PENDING: a heatmap of Table 5.8 room by distance and switch time]; show Tables 5.7-5.9.
+  over OMA for the same agent. Round 2 of the full AI dropped (D-56).
+- In progress (expected 24-25 Oct 2026, not results): anticipation rule, hybrid timing AI.
+- **Figure:** `docs/report/figures/room_fresh_seeds.png` (report Figure 5.13); Tables 5.7-5.10 as backup.
 - **Speaker notes:** "Before spending two weeks training, we asked: if a pilot knew the future perfectly, how much better could
   it do? For walking crowds the answer was almost nothing, because the drone is ten times faster than people. So we built
   scenarios where looking ahead matters, and measured the room there first. Our first learning agents still lost to a simple
@@ -97,15 +98,16 @@ experiments that are not finished. Wording rule: "simulation-based planning tool
 
 ## 11. 3D demo: does a real-looking drone change anything?
 - The same pilots flown by a simulated quadcopter with an autopilot, motor lag, tilt limit and wind.
-- Coverage gap -0.003 to -0.012; wind changes it by at most 0.002 (5 scenarios per cell: a short check).
-- **Figure / live demo:** the dashboard's "3D flight" page (`streamlit run uav_dataset/dashboard.py`) [PENDING: screenshot for
-  the slide; fallback GIF `gifs/B4_hard_seed5.gif`].
+- Coverage gap -0.003 to -0.012; wind changes it by at most 0.002 (5 scenarios per cell: a short check). Its battery numbers are
+  not trustworthy yet.
+- **Figure / live demo:** `docs/report/figures/fig_3d_flight.png` (report Figure 5.14), or live: the dashboard's "3D flight" page
+  (`streamlit run uav_dataset/dashboard.py`).
 - **Speaker notes:** "Our game moves the drone like a chess piece. Here a full flight model with an autopilot flies the same
   plan. The answer barely changes, so our conclusions are not an artefact of the simple flight model. This is still a simulation,
   not a real flight."
 
 ## 12. Contributions
-- An open, tested, reproducible simulation-based planning tool for UAV-NOMA in disasters (seeds, configs, 343+ tests, CI).
+- An open, tested, reproducible simulation-based planning tool for UAV-NOMA in disasters (seeds, configs, 399 tests, CI).
 - A fair evaluation protocol: strong simple pilots, paired confidence intervals, pre-registered pass marks.
 - NOMA measured inside the mission for every pilot, including against an equally optimised OMA.
 - Findings: altitude choice explains most of a search pilot's lead; circling saves a quarter of the battery; the clairvoyant
@@ -124,8 +126,8 @@ experiments that are not finished. Wording rule: "simulation-based planning tool
   what we have not verified yet."
 
 ## 14. Future work and thank you
-- Finish H2: anticipation rule, hybrid timing AI, value of information [PENDING].
-- Locate survivors from their connected phones; real places from OpenStreetMap [PENDING]; tethered drones; the 120 m limit.
+- In progress (expected 24-25 Oct 2026): anticipation rule, hybrid timing AI, value of location information.
+- Locate survivors from their connected phones; a real place from OpenStreetMap (demo); tethered drones; the 120 m limit.
 - Disaster events (flood, aftershock), wind and GPS errors, a safety layer; ArduPilot SITL; several drones.
 - Business track: a planning and rehearsal tool for emergency teams; talk to 5-10 practitioners first.
 - **Figure:** `gifs/best_ai_e5a_seed105.gif` or a dashboard screenshot.
@@ -138,5 +140,5 @@ experiments that are not finished. Wording rule: "simulation-based planning tool
 - Adaptive NOMA closed form (report Section 3.4).
 - Information ladder table (report Table 5.5).
 - All G4 runs (report Table 5.6).
-- Competing-sites room table (report Table 5.8) and G5 round 1 (Table 5.9).
-- Sim-to-sim table (report Table 5.10).
+- Competing-sites room tables (report Tables 5.8, 5.9) and G5 round 1 (Table 5.10).
+- Sim-to-sim table (report Table 5.11).

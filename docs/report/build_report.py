@@ -1,6 +1,8 @@
 """Build the major-project report PDF from report.md, with the same Markdown converter as the project book.
 
-    python docs/report/build_report.py        # writes docs/report/UAV-NOMA-Report.pdf (needs requirements-docs.txt)
+    python docs/report/build_report.py           # writes UAV-NOMA-Report.pdf and UAV-NOMA-Guide-Brief.pdf
+    python docs/report/build_report.py brief     # only the guide brief (guide_brief.md); "report" for only the report
+    (needs requirements-docs.txt; the charts in docs/report/figures/ come from make_figures.py)
 
 What it adds on top of docs/book/build_pdf.py:
 - a title page from the block between <!-- titlepage --> and <!-- /titlepage -->;
@@ -207,7 +209,7 @@ def build():
                 story.append(bp.KeepTogether([story.pop(), f]))   # keep a table caption with its table
             else:
                 story.append(f)
-    ReportDoc(OUT).multiBuild(story)
+    ReportDoc(OUT).multiBuild(glue_captions(story))
     return OUT
 
 
@@ -226,6 +228,54 @@ class ReportDoc(bp.BookDoc):
         canvas.restoreState()
 
 
+def glue_captions(story):
+    """Keep a 'Figure n: [title](picture)' line on the same page as the picture that follows it."""
+    out = []
+    for f in story:
+        if (isinstance(f, bp.KeepTogether) and any(isinstance(x, bp.RLImage) for x in f._content) and out
+                and isinstance(out[-1], bp.Paragraph) and out[-1].getPlainText().startswith("Figure")):
+            f = bp.KeepTogether([out.pop()] + list(f._content))
+        out.append(f)
+    return out
+
+
+class BriefDoc(bp.BookDoc):
+    def __init__(self, path):
+        super().__init__(path)
+        self.title = "UAV-NOMA Disaster Network Planning Simulator: brief for the guide"
+
+    @staticmethod
+    def decorate(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("DV", 7.5)
+        canvas.setFillColor(bp.colors.HexColor("#777777"))
+        canvas.drawString(2 * bp.cm, 1.2 * bp.cm, "UAV-NOMA Disaster Network Planning Simulator: brief for the guide")
+        canvas.drawRightString(bp.A4[0] - 2 * bp.cm, 1.2 * bp.cm, f"page {doc.page}")
+        canvas.restoreState()
+
+
+def build_brief(scale=0.82):
+    """guide_brief.md -> UAV-NOMA-Guide-Brief.pdf: no title page or contents; pictures drawn a little smaller."""
+    bp._embedded.clear()
+    text = COMMENT.sub("", BRIEF_SRC.read_text(encoding="utf-8"))
+    story = bp.chapter_flowables(MdText(text))
+    for f in story:
+        for item in getattr(f, "_content", []):
+            if isinstance(item, bp.RLImage):
+                item.drawWidth *= scale
+                item.drawHeight *= scale
+    BriefDoc(BRIEF_OUT).multiBuild(glue_captions(story))
+    return BRIEF_OUT
+
+
+BRIEF_SRC = HERE / "guide_brief.md"
+BRIEF_OUT = HERE / "UAV-NOMA-Guide-Brief.pdf"
+
 if __name__ == "__main__":
-    path = build()
-    print(f"wrote {path} ({path.stat().st_size / 1e6:.1f} MB), {len(bp._embedded)} pictures embedded")
+    which = sys.argv[1:] or ["report", "brief"]
+    if "report" in which:
+        path = build()
+        print(f"wrote {path} ({path.stat().st_size / 1e6:.1f} MB), {len(bp._embedded)} pictures embedded")
+    if "brief" in which:
+        path = build_brief()
+        print(f"wrote {path} ({path.stat().st_size / 1e6:.1f} MB), {len(bp._embedded)} pictures embedded")

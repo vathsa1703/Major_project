@@ -86,11 +86,12 @@ circling at the minimum-power speed serves about 26% more people per battery tha
 sees only what a real drone could measure did not reach its first gate (0.576 against a pass mark of 0.580). A "clairvoyant"
 pilot that knows the crowd's future showed why: in walking-crowd scenarios there is almost no room for anticipation (+0.002).
 In redesigned scenarios with demand switching between sites 2 km apart there is room, but the first round of learning agents
-still scored 0.073 to 0.137 below the best simple pilots. A simulated quadcopter with an autopilot flew the same plans within
+still scored 0.073 to 0.137 below the best simple pilots, so the next step is a hybrid in which the AI only decides when to
+leave. A simulated quadcopter with an autopilot flew the same plans within
 0.012 coverage of the simplified game. We report where learning helps, where it does not, and what remains open.
 <!-- src: H1 0.741 vs 0.428 book 7.8 (rounded 74/43 as in docs/summary); NOMA +0.03..+0.05 book 13.9; +25.6% book 7.10;
-G4 0.576 vs 0.580 book 8.8; clairvoyant +0.002 book 7.11; G5 round 1 -0.073..-0.137 NOT IN BOOK: results/g5/r1_t0 and r1_t60
-summary.md (lead's checkout); sim-to-sim -0.003..-0.012 NOT IN BOOK: uav_dataset/results/sim2sim/summary.md -->
+G4 0.576 vs 0.580 book 8.8; clairvoyant +0.002 book 7.11; G5 round 1 book 8.9 (per-agent range -0.073..-0.137 from
+results/g5 summaries); sim-to-sim -0.003..-0.012 book 4.9 -->
 
 **Keywords:** UAV base station, NOMA, disaster communication, air-to-ground channel, rotary-wing energy, reinforcement
 learning, baselines, simulation-based planning.
@@ -117,6 +118,9 @@ learning, baselines, simulation-based planning.
 | 5.9 | First AI pilot (velocity control) drifting away from the crowd | 5.6 |
 | 5.10 | Waypoint control with a 10-second decision rhythm | 5.6 |
 | 5.11 | Best AI (E0) vs grid search on validation scenario 105 | 5.6 |
+| 5.12 | Circling vs hovering | 5.4 |
+| 5.13 | Room for a pilot that thinks ahead, fresh scenarios | 5.7 |
+| 5.14 | The 3D flight page (simulated quadcopter) | 5.9 |
 
 # List of tables
 
@@ -137,8 +141,9 @@ learning, baselines, simulation-based planning.
 | 5.6 | Gate G4 runs | 5.6 |
 | 5.7 | Clairvoyant headroom on walking crowds | 5.7 |
 | 5.8 | Room in the competing-sites designs | 5.7 |
-| 5.9 | G5 round 1 | 5.8 |
-| 5.10 | Sim-to-sim check | 5.9 |
+| 5.9 | Room confirmed on fresh scenarios | 5.7 |
+| 5.10 | G5 round 1 | 5.8 |
+| 5.11 | Sim-to-sim check | 5.9 |
 | 6.1 | Where each tool fits | 6.1 |
 | 7.1 | Hypotheses: verdicts | 7.1 |
 
@@ -202,10 +207,10 @@ Every experiment serves one of these hypotheses.
 competing-site events; collapsed buildings as 2D rectangles; the Al-Hourani mean path loss with optional fading; the
 Zeng-Xu-Zhang energy model with a battery; NOMA (fixed and adaptive) and OMA downlinks; ten non-learning pilots, PPO and SAC
 agents; a clairvoyant planner; a simulated quadcopter with an autopilot; a Streamlit dashboard.
-<!-- src: book 4.1-4.7, 7.1 (B0-B8 + B6fc), 8.8, 7.11; quadcopter: commit 233827e quadsim.py (NOT IN BOOK) -->
+<!-- src: book 4.1-4.7, 7.1 (B0-B8 + B6fc), 8.8, 7.11; quadcopter: book 4.9 -->
 
-**Out of scope:** real hardware and flight tests; building heights, terrain and real maps (a real place is
-[PENDING: OpenStreetMap buildings]); the drone's own backhaul; interference from other cells; bit-error rate; more than one
+**Out of scope:** real hardware and flight tests; building heights, terrain and real maps (a real place from OpenStreetMap
+is planned only as a demonstration); the drone's own backhaul; interference from other cells; bit-error rate; more than one
 drone (H4 was not attempted). All results are conditional on the model: they may be used to compare strategies under the stated
 assumptions, not to predict absolute coverage in a real disaster.
 <!-- src: book 4.9, 10.5 -->
@@ -319,8 +324,10 @@ From the survey, the defensible contribution is not a new algorithm but **an ope
 UAV-NOMA planning in disaster scenarios, a comparison of learning against strong non-learning pilots across regimes, and an
 analysis of when learning helps**, together with specific findings: most of a search pilot's lead can come from choosing the
 altitude; forward flight costs less energy than hovering; NOMA's gain measured inside the mission for every pilot; and a method
-(clairvoyant headroom) for deciding whether a scenario leaves any room for a learning controller at all.
-<!-- src: book 11.2 -->
+(clairvoyant headroom) for deciding whether a scenario leaves any room for a learning controller at all. Two further
+contributions are in progress: an anticipation rule that predicts that room from distance, speed and timing, and a design
+rule for how much phone location information a planner needs (D-56).
+<!-- src: book 11.2, D-56 -->
 
 <!-- pagebreak -->
 
@@ -541,7 +548,7 @@ flowchart TD
 **Dashboard.** A Streamlit web page on the same engine, with pages to see the showcase, fly a disaster with any pilot, compare
 pilots, get a plan with battery advice, and (since Stage 5) watch a 3D flight. Its numbers equal the experiments' because it
 calls the same code; 16 tests check this without Streamlit.
-<!-- src: book 9.4 (test_dashboard_core 16), D-50, roadmap parallel tracks; 3D page: commit 233827e (NOT IN BOOK) -->
+<!-- src: book 9.4 (test_dashboard_core 16), D-50, roadmap parallel tracks; 3D page: book 4.9 -->
 
 **Simulated quadcopter (Stage 5).** In the game the drone moves like a chess piece. In Stage 5 every pilot's velocity command
 instead becomes the set-point of an autopilot (like ArduPilot GUIDED velocity mode) flying a rigid-body quadrotor model of the
@@ -549,7 +556,7 @@ same 2.04 kg drone: thrust and attitude dynamics, a first-order motor lag, rotor
 thrust-to-weight ratio of 2, a geofence, and wind with seeded gusts, integrated at 100 Hz. Energy is still computed by the
 Zeng model, from the airspeed, climb and acceleration of every integration step. The autopilot values quoted from ArduPilot and
 PX4 are marked as not verified.
-<!-- src: NOT IN BOOK: uav_dataset/quadsim.py docstring and commit 233827e message -->
+<!-- src: book 4.9; mass, tilt, thrust-to-weight and 100 Hz from the quadsim.py docstring and commit 233827e -->
 
 *Figure 3.5 The 3D quadcopter in the loop (sim-to-sim)*
 
@@ -595,18 +602,17 @@ documents. Development on Windows 11 (laptop CPU); continuous integration on Git
 <!-- src: book 9.1; later files from the tree of branch final/integrate -->
 
 ## 4.3 Testing and continuous integration
-- **343 automated tests** at the last book update (2026-10-22), covering the NOMA maths (including brute force on small crowds
+- **399 automated tests** (2026-10-23), covering the NOMA maths (including brute force on small crowds
   and an independent re-derivation of the closed form, exact to 1e-15 over 2,000 random pairs), the mobility models, the
   obstacle geometry, the energy model, the Gymnasium checker, every pilot, the statistics, the clairvoyant planner (equal to
   brute force on a small grid), the privileged-critic guard (the flying network's output is bit-identical when only the
-  privileged data changes) and the dashboard logic. On the integration branch 399 tests are now collected (including 26 for
-  the quadcopter).
+  privileged data changes), the dashboard logic and the quadcopter (26 tests).
 - Every pull request runs ruff lint, pytest on Python 3.11 and 3.12 with an 80% coverage gate on the core modules, a smoke run
   of the generator, and a separate RL job with a short PPO training.
 - `main` is protected: pull requests, green CI and code-owner review.
 - Bugs caught this way include the fading flag not reaching the channel, a missing dependency, a policy adapter used before
   `reset()`, and a "shaking" energy exploit found by a reviewer and closed with an acceleration limit.
-<!-- src: book 9.3, 9.4, 13.9, 7.11, 8.8, 4.7; 399 and 26 measured with pytest --collect-only and commit 233827e (NOT IN BOOK) -->
+<!-- src: book 9.3, 9.4 (399 on 2026-10-23), 13.9, 7.11, 8.8, 4.7, 4.9 -->
 
 ## 4.4 Reproducibility
 - Seeded random generators only; the same seed gives the same scenario; a training run killed by a session restart was re-run
@@ -754,6 +760,9 @@ B6 but circles them at 9.8 m/s. With the acceleration limit and turning cost on,
 | 5-minute mission, hard, 16 Wh | 0.739 | 0.731 | -0.009* |
 <!-- src: book 7.10 -->
 
+Figure 5.12: [Circling vs hovering: 5-minute missions on a tight battery and flying until empty](figures/circling_vs_hovering.png)
+<!-- src: drawn by docs/report/make_figures.py from book 7.10 -->
+
 The gain stays between +21% and +31% when the unverified drag d0, the induced power, the acceleration limit or the radius are
 changed one at a time, so it does not depend on d0 = 0.6. A one-line rule (B8: circle once the battery would not last) captures
 the whole battery decision (12 Wh: 0.716; 13 Wh: 0.733), which means **a tight battery alone leaves nothing for an AI to win**.
@@ -853,23 +862,51 @@ use the G5 settings (adaptive NOMA, SIC residual 0.05, rescue first, acceleratio
 | 2.0 km (133 s) | +0.108 | +0.098 | +0.056 |
 <!-- src: book 7.12 -->
 
-7 of 9 designs passed. **Room appears when the flight across is about as long as, or longer than, the switch.** On 20 fresh
-scenarios per design and against the forecasting pilot B6fc, 5 of 9 designs still had room; a reviewer then found that B6fc
-leaves too early, and a departure-time version narrows the room to the 2 km designs (+4 to +9 people per 100). The 2 km
-announced designs became the G5 training cells.
-<!-- src: book 7.12, journal 55, D-55 -->
+7 of 9 designs passed on these design scenarios. **Room appears when the flight across is about as long as, or longer than,
+the switch.** As the pre-registered rules required, the designs were then re-measured on fresh scenarios, and a forecasting
+pilot was added to the bar: **B6fc** scores each candidate spot by the coverage it would give when the drone *arrives* there and
+for the following minute, using only what could be observed (positions now, movement in the last second and, in announced
+designs, the operator's message). Tests show it never reads the future.
+<!-- src: book 7.12, 7.13 -->
 
-[PENDING: the anticipation-rule experiment (a simple "leave at the right time" pilot as a stronger bar). Report its score per
-G5 cell, whether it joins the bar (D-55 allows it), and the remaining room.]
+*Table 5.9 Room confirmed on fresh scenarios (seeds 1000-1019, 20 per design; first number: bar of B6, B7, B8; second: bar also including B6fc with the announcement; pass 0.02)*
+
+| Sites apart | Sudden switch | Over 1 minute | Over 3 minutes |
+|---|---|---|---|
+| 1.0 km | 0.016 / 0.013 (no) | 0.005 / 0.005 (no) | 0.004 / 0.004 (no) |
+| 1.5 km | **0.056 / 0.038 (yes)** | **0.029 / 0.029 (yes)** | 0.012 / 0.012 (no) |
+| 2.0 km | **0.091 / 0.046 (yes)** | **0.071 / 0.047 (yes)** | **0.029 / 0.029 (yes)** |
+<!-- src: book 7.13 -->
+
+Figure 5.13: [Room for a pilot that thinks ahead, on fresh scenarios, against both bars](figures/room_fresh_seeds.png)
+<!-- src: drawn by docs/report/make_figures.py from book 7.13 -->
+
+**5 of 9 designs are confirmed**; two that passed on the design scenarios (1.0 km sudden, 1.5 km over 3 minutes) did not, which
+is exactly why fresh scenarios were required. With a 13 Wh battery only the two 2 km designs (sudden, 1 minute) keep room. With
+the announcement, B6fc captures 36-52% of the room in the sudden and 1-minute designs, but in slow 3-minute switches it does
+worse than plain B6 because it leaves too early. A departure-time version (B6dep: stay until the best moment, then fly) narrowed
+the 1.5 km designs below 0.02 on 4 scenarios, leaving **the 2 km designs as the clear place where an AI could win (+0.04 to
++0.09)**; these became the G5 training cells.
+<!-- src: book 7.13, D-55 -->
+
+**In progress (expected 24-25 Oct 2026): the anticipation rule.** *Not a result yet.* What is being done: one number built from
+the distance between sites, the drone's speed, the switch duration and the mission length, intended to predict when
+anticipation (and so any AI) can beat greedy re-planning, together with the departure-time pilot and a three-part breakdown of
+any AI's shortfall (foresight, information, learning). How it will be judged (pre-registered, D-56): the rule is fitted on the
+9 designs above, and its predictions for 8 new designs are written down before those designs are run. What would confirm it:
+the predicted "room / no room" verdicts match the measured clairvoyant room on the new designs. What would refute it: the
+predictions miss on the new designs. A quick search found no published equivalent; this still has to be checked in the
+literature review.
+<!-- src: D-56 -->
 
 ## 5.8 RL on competing sites: Gate G5, round 1 (negative result)
-Round 1 (pre-registered, D-55) trained E0's design plus the event announcement, with fly-to-spot (`goto`) or move-by (`moveby`)
-steering, two training seeds each, 150,000 decisions per run, on the two 2 km announced cells. The bar is, per scenario, the best
-of B6, B7, B8 and B6fc. All runs use adaptive NOMA (eps 0.05, rescue first) and the acceleration limit; each agent was also
-evaluated with optimised OMA.
-<!-- src: D-55; results NOT IN BOOK: uav_dataset/results/g5/r1_t0/summary.md and r1_t60/summary.md (lead's checkout) -->
+Round 1 (pre-registered, D-55) trained E0's design plus the event announcement, with fly-to-spot (`goto`) or move-by (`moveby`:
+"move this far", 0 = stay, built to stop the "flies past the spot" fault) steering, two training seeds each, 150,000 decisions
+per run (about 3.5 h each, on Kaggle), on the two 2 km announced cells. The bar is, per scenario, the best of B6, B7, B8 and B6fc.
+All runs use adaptive NOMA (eps 0.05, rescue first) and the acceleration limit; each agent was also evaluated with optimised OMA.
+<!-- src: book 8.9, D-55 -->
 
-*Table 5.9 G5 round 1 (validation, 20 scenarios; `*` = CI excludes 0)*
+*Table 5.10 G5 round 1 (validation, 20 scenarios; `*` = CI excludes 0)*
 
 | Cell (bar) | Agent | Coverage (NOMA) | Agent minus bar | Coverage with OMA | NOMA minus OMA |
 |---|---|---|---|---|---|
@@ -881,54 +918,72 @@ evaluated with optimised OMA.
 | switch over 60 s | goto, seed 1 | **0.680** | -0.073* | 0.552 | +0.129* |
 | switch over 60 s | moveby, seed 0 | 0.616 | -0.137* | 0.522 | +0.094* |
 | switch over 60 s | moveby, seed 1 | 0.629 | -0.124* | 0.528 | +0.101* |
-<!-- src: NOT IN BOOK: results/g5/r1_t0/summary.md (bar 0.756; B6 0.711, B7 0.705, B8 0.711, B6fc 0.748) and
-r1_t60/summary.md (bar 0.753; B6 0.721, B7 0.717, B8 0.721, B6fc 0.748) -->
+<!-- src: book 8.9 (agent scores, bars 0.756 / 0.753 with B6 0.711 / 0.721 and B6fc 0.748, best AI vs bar -0.076 / -0.073);
+per-agent "minus bar" and OMA columns from uav_dataset/results/g5/r1_t0 and r1_t60 summary.md (not tabulated in the book) -->
 
-**Every agent is significantly below the bar** (best 0.680 against 0.756 and 0.753), and also below plain B6 (by 0.031 to
-0.104). The forecasting pilot B6fc (0.748 in both cells) carries almost all of the bar. Fly-to-spot steering was at least as good
-as move-by in both cells. **NOMA stays visible here too:** for the same trained agent, adaptive NOMA serves 8 to 13 more people
-per 100 than optimised OMA in every run.
-<!-- src: NOT IN BOOK: results/g5 summaries -->
+**Every agent is significantly below the bar** (best 0.680 against 0.756 and 0.753), and also below plain B6 (by 0.03 to 0.10).
+The forecasting pilot B6fc (0.748 in both cells) carries almost all of the bar. The `moveby` steering did not help (equal on the
+sudden design, worse on the 1-minute design). **NOMA stays visible here too:** the same agents serve 0.08 to 0.13 more people
+with adaptive NOMA than with tuned OMA (all significant; the agents were trained with NOMA, so their OMA runs are outside what
+they learned).
+<!-- src: book 8.9 -->
 
-[PENDING: G5 round 2 (the chosen steering, 5 training seeds per cell) or its replacement by the hybrid timing AI; the share of
-the clairvoyant room captured; the negative control on a no-room cell; the single read of the test seeds.]
+**What it means.** The room exists, but an AI that has to learn *everything* (where to fly as well as when) from rough maps
+does not reach it with this budget; it does not even react as well as the search pilot. The room is mostly about **one decision:
+when to leave for the other site**. Round 2 of the full AI (5 more seeds) was therefore dropped as uninformative (D-56).
+<!-- src: book 8.9, D-56 -->
 
-[PENDING: the hybrid timing AI. A hierarchical design in which the AI decides only *when* to leave for the other site and a
-computed search (B6) chooses *where*, following the time-scale split of Section 6.1 (owner's decision D-38: "hierarchical
-later"). Report its 5-seed mean against the same bar, and NOMA vs OMA for it.]
+**In progress (expected 24-25 Oct 2026): the hybrid timing AI.** *Not a result yet.* What is being done: a hybrid in which the
+search pilot B6 decides *where* (position and altitude) and the AI learns only *when* to leave for the announced site, the one
+decision where the room is; it is disclosed as a hybrid (D-56). How it will be judged: on the same two 2 km cells, against the
+same pre-registered bar (best of B6, B7, B8, B6fc per scenario, D-55), with paired confidence intervals on the 20 validation
+scenarios and NOMA vs OMA reported for the agent. What would confirm H2 in this regime: the hybrid beats the bar significantly
+in at least one cell, and does not beat B6 on a no-room cell (negative control). What would refute it: it stays at or below the
+bar, as the full AI did.
+<!-- src: D-55, D-56 -->
 
 ## 5.9 Sim-to-sim: does the simplified flight model change the results?
 The same pilots flew the same validation scenarios (seeds 100-104) in the point-mass game and with the simulated quadcopter and
-autopilot, in calm air and in wind.
-<!-- src: NOT IN BOOK: uav_dataset/results/sim2sim/summary.md and sim2sim_exp.py docstring -->
+autopilot (Section 3.10), in calm air and in 5 m/s wind with gusts.
+<!-- src: book 4.9 -->
 
-*Table 5.10 Sim-to-sim check (5 scenarios per cell)*
+*Table 5.11 Sim-to-sim check (5 scenarios per cell)*
 
-| Cell | Game coverage | Quadcopter, calm | Quadcopter, wind | Coverage gap (calm / wind) | Energy (Wh): game / calm |
-|---|---|---|---|---|---|
-| B6 on `hard` | 0.694 | 0.691 | 0.691 | -0.003 / -0.003 | 14.70 / 13.38 |
-| B6 on `sites_d20_t0_ann` | 0.632 | 0.626 | 0.626 | -0.006 / -0.006 | 13.89 / 13.96 |
-| AI E0 on `rl_static` | 0.447 | 0.436 | 0.435 | -0.010 / -0.012 | 12.33 / 12.00 |
-<!-- src: NOT IN BOOK: uav_dataset/results/sim2sim/summary.md (found in worktree agent-a1174634ca3604fcd; lead to confirm it is the merged version) -->
+| Cell | Game coverage | Quadcopter, calm | Quadcopter, wind | Coverage gap (calm / wind) |
+|---|---|---|---|---|
+| B6 on `hard` | 0.694 | 0.691 | 0.691 | -0.003 / -0.003 |
+| B6 on `sites_d20_t0_ann` | 0.632 | 0.626 | 0.626 | -0.006 / -0.006 |
+| AI E0 on `rl_static` | 0.447 | 0.436 | 0.435 | -0.010 / -0.012 |
+<!-- src: book 4.9 (gap 0.003-0.012, wind <= 0.002); per-cell values from uav_dataset/results/sim2sim/summary.md (not
+tabulated in the book) -->
 
 Flying with a quadcopter model, autopilot lag and a 30 degree tilt limit costs only 0.003 to 0.012 coverage, and wind changes the
-result by at most 0.002, so **the conclusions drawn in the simplified game carry over to a flying vehicle model** (a
-simulation-to-simulation check, not a real flight). On `hard` the quadcopter used 1.3 Wh less energy than the game while flying a
-longer path (2.49 vs 1.39 km), which would be consistent with forward flight being cheaper than hovering (Section 5.4), but this
-explanation has not been checked. Only 5 scenarios per cell: a short check, not a full evaluation. The B6 cell on sites uses the
-G5 radio settings (adaptive NOMA); the other two cells use their profiles' default (fixed NOMA).
-<!-- src: NOT IN BOOK: sim2sim summary (path 1.39 vs 2.49 km); sim2sim_exp.py docstring -->
+result by at most 0.002 (the autopilot holds its spot within about a metre). Pilots built for the point game would overshoot
+their target on a realistic drone unless they brake in time; with the acceleration limit they do (median 1.8 m off target). So
+**the coverage conclusions carry over to a flying vehicle model** (a simulation-to-simulation check, not a real flight). **The
+quadcopter's energy numbers are not trustworthy yet:** the Zeng formula makes wobbling and wind look cheaper than hovering, so
+battery results on the quadcopter need more work. Only 5 scenarios per cell, and not validated against a real drone or
+ArduPilot/PX4 software-in-the-loop.
+<!-- src: book 4.9 -->
 
-## 5.10 Value of information
-[PENDING: the value-of-information study. Planned question: how much coverage does each piece of information a real drone could
-obtain (crowd size from connected users, finer maps, the announcement, positions estimated from attached phones) add for the
-search pilots and for the AI? The still-crowd information ladder (Section 5.5) is the first rung; report the full ladder on the
-G5 cells, with NOMA and OMA.]
+Figure 5.14: [The 3D flight page: B6 flown by the simulated quadcopter in wind on a 2 km competing-sites scenario (validation seed 100), 170 s into the mission, crossing towards the newly active site (grey = people not counted now, at the other site); one scenario, for illustration only](figures/fig_3d_flight.png)
+<!-- src: screenshot of the dashboard's 3D page (dashboard_core.flight3d + viewer3d_html, headless Chrome), made for this report -->
+
+## 5.10 Value of location information
+**In progress (expected 24-25 Oct 2026).** *Not a result yet.* After a disaster the drone *is* the network, so phones that attach
+to it can report their position. What is being done: measuring the share, accuracy and age of phone position reports a planner
+needs to reach 98% of the coverage it gets with full information (D-56). How it will be judged: the search pilots are run with
+degraded location information (fewer phones reporting, noisier positions, older reports) on the same scenarios and compared,
+paired, with the full-information run; the still-crowd information ladder (Section 5.5) is the first data point. What would
+make it a useful design rule: a clear threshold (for example "x% of phones, y m accuracy, z s old is enough"); what would
+weaken it: coverage that falls smoothly with no usable threshold, or a threshold that depends strongly on the scenario.
+<!-- src: D-56, book 8.7 -->
 
 ## 5.11 Real-place scenario
-[PENDING: real-place OpenStreetMap buildings. A scenario based on a real area (buildings and shelters from OpenStreetMap, with
-the required credit line), labelled "a scenario based on ..."; crowds reconstructed, never presented as real survivor data.
-Report the main pilots and NOMA vs OMA on it.]
+**Planned, not started; date not fixed.** A scenario based on a real area (buildings and shelters from OpenStreetMap, with the
+required credit line), labelled "a scenario based on ...", with crowds reconstructed and never presented as real survivor data.
+By the owner's decision it is a demonstration and a final test of the anticipation rule, not a headline result (D-56).
+<!-- src: D-56, CLAUDE.md ideas backlog -->
 
 <!-- pagebreak -->
 
@@ -944,8 +999,8 @@ The results support a split of the control problem by time scale, which a commun
 | Radio resource allocation (pairing, power per pair) | every second | Closed form and optimisation: adaptive NOMA (Section 5.3) |
 | Placement for the users as they are now | every 10 s | Search: B6 (grid + altitude) is near-optimal for walking crowds (Section 5.7) |
 | Battery strategy (hover or circle) | minutes | A one-line rule: B8 (Section 5.4) |
-| Mission timing when demand jumps between distant sites | minutes | The only place with measured room (+0.04 to +0.11); learning has not captured it yet (Section 5.8) |
-<!-- src: book 14.2, 7.10-7.12, journal 55; G5 NOT IN BOOK -->
+| Mission timing when demand jumps between distant sites | minutes | The only place with confirmed room (2 km designs, +0.04 to +0.09); the full AI has not captured it; a hybrid timing AI is in progress (Section 5.8) |
+<!-- src: book 14.2, 7.10-7.13, 8.9 -->
 
 "Do not learn what you can compute." On still crowds, a search with the AI's own inputs reaches B2's level, so a learner could
 in principle pass G4, but end-to-end RL did not turn the maps into a precise spot. On walking crowds no controller can gain more
@@ -956,8 +1011,10 @@ to report.
 ## 6.2 H2 so far
 H2 is **not supported** by the evidence so far: the AI did not match B2 on still crowds (G4), and in G5 round 1 every agent was
 significantly below the bar. The clairvoyant method explains part of this (no room in walking-crowd scenarios) and located the
-regime where room exists. Whether a hierarchical agent closes the gap there is [PENDING: hybrid timing AI].
-<!-- src: book 8.8, 7.11, 7.12; G5 NOT IN BOOK -->
+regime where room exists. Whether a hybrid agent that only decides when to leave closes the gap there is being tested now
+(Section 5.8, in progress); until then the honest framing is that **physics-based search is the main controller and learning
+helps, if at all, only in specific regimes**.
+<!-- src: book 8.8, 8.9, 7.11-7.13, D-56 -->
 
 ## 6.3 Limitations
 - **Model limits:** no building heights or terrain; obstacles are 2D rectangles with a fixed 15 dB loss; no backhaul; no
@@ -970,8 +1027,10 @@ regime where room exists. Whether a hierarchical agent closes the gap there is [
 - **Regulation:** our altitude range (50-300 m) is above the 120 m limit that drone rules commonly set for routine flights
   [PENDING/VERIFY: cite India's Drone Rules 2021 and the DGCA airspace map]; results at the lower altitudes need a re-run.
 - **Statistics:** several experiments use 12-20 scenarios per cell; the sim-to-sim check uses 5.
+- **Quadcopter energy:** the coverage results carry over to the quadcopter model, but its battery numbers are not yet
+  trustworthy (Section 5.9).
 - **Single drone:** H4 was not attempted.
-<!-- src: book 4.9, 11.3, 13.9, 10.2, 7.12; 120 m limit NOT IN BOOK (to verify) -->
+<!-- src: book 4.10, 11.3, 13.9, 10.2, 7.12, 4.9; 120 m limit NOT IN BOOK (to verify) -->
 
 ## 6.4 Threats to validity
 - **Internal:** a bug could favour one pilot. Mitigations: one shared `env.step()`, paired comparisons on identical scenarios,
@@ -999,24 +1058,27 @@ and used it to test four hypotheses fairly.
 | Hypothesis | Verdict | Evidence |
 |---|---|---|
 | H1 adaptive beats fixed | **Supported** where area is large and power scarce | `hard`: 0.741 vs 0.428 (Table 5.1); small gap in default scenarios (0.914 vs 0.882) |
-| H2 RL beats heuristics only under dynamics and battery limits | **Not supported so far** | G4 not met (0.576 < 0.580); G5 round 1 all agents below the bar (best 0.680 vs 0.756); no room on walking crowds (+0.002) |
+| H2 RL beats heuristics only under dynamics and battery limits | **Not supported so far** (hybrid timing AI in progress) | G4 not met (0.576 < 0.580); G5 round 1 all agents below the bar (best 0.680 vs 0.756); no room on walking crowds (+0.002); room confirmed only on 2 km competing sites |
 | H3 NOMA beats OMA | **Supported**, with an honest trade-off | Adaptive NOMA +0.03 to +0.05 over equally optimised OMA for every pilot; fixed NOMA loses coverage at 30 dBm (232 kbps ceiling) |
 | H4 multi-UAV | **Not attempted** | Stretch goal |
-<!-- src: book 7.5, 7.8, 8.8, 7.11, 13.5, 13.9; G5 NOT IN BOOK -->
+<!-- src: book 7.5, 7.8, 8.8, 8.9, 7.11, 13.5, 13.9 -->
 
 Further findings: most of a search pilot's lead came from choosing the altitude; circling at the minimum-power speed serves about
 26% more people per battery; the clairvoyant headroom test tells in advance whether a scenario leaves any room for a learning
-controller; and a quadcopter with an autopilot flies our plans within 0.012 coverage of the simplified game.
+controller, and room for it was confirmed on fresh scenarios only where demand jumps between sites 2 km apart; and a
+quadcopter with an autopilot flies our plans within 0.012 coverage of the simplified game.
 
 ## 7.2 Future work
-1. **Finish H2 where room exists:** the anticipation rule as a stronger bar, the hybrid timing AI, G5 round 2 with 5 seeds, the
-   negative control, and one read of the test seeds [PENDING].
+1. **Finish what is in progress (expected 24-25 Oct 2026):** the anticipation rule (fitted on 9 designs, tested on 8 new ones
+   with predictions written first), the hybrid timing AI against the pre-registered bar, and the value of location
+   information; then the final evaluation (negative control, one read of the test seeds) and this report.
 2. **Connect-and-locate survivors from attached phones.** A drone base station knows which phones are connected and can estimate
    where they are from signal strength or timing. Replacing the "true positions" of the baselines and the density maps of the AI
-   with such estimates closes the largest realism gap, and is the natural input for the value-of-information study [PENDING].
+   with such estimates closes the largest realism gap; the value-of-location-information study (Section 5.10) is the first step,
+   and it is also a possible product (business track).
 3. **Real places:** OpenStreetMap buildings and shelters as obstacles and targets, population density for crowd placement, flood
    extents and elevation; labelled "a scenario based on ...", never real survivor data, since survivor positions are not
-   published [PENDING: OpenStreetMap buildings].
+   published (planned as a demonstration, Section 5.11).
 4. **Tethered drones:** a tether supplies power and backhaul, removing the battery limit and the backhaul gap, at the cost of a
    fixed ground station and a limited radius; drone cell sites of this kind (for example AT&T's tethered "Flying COW") have been
    reported in news sources after hurricanes [VERIFY citation].
