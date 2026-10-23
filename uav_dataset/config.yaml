@@ -248,6 +248,8 @@ rl:
   profile: rl_static             # which scenario profile to train on
   hold_steps: 10                 # the agent decides once every 10 s (like the baselines)
   controls: goto                 # curriculum: goto (where to fly) -> gotoz (+ altitude) -> gotozp (+ power); xy/xyz/xyzp = velocity versions
+                                 # moveby/movebyz/movebyzp = "move this far" versions (offset from the drone; 0 = stay), for G5
+  moveby_radius_m: null          # largest move per decision; null = v_max x hold_steps (150 m at 15 m/s, 10 s). ENGINEERING CHOICE
   reward: v1                     # v1 = coverage only; v2 adds the energy cost (curriculum step 5)
   seed: 0
   total_timesteps: 100000        # agent DECISIONS (each held hold_steps seconds): 100k decisions = 1M seconds
