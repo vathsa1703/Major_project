@@ -11,17 +11,20 @@
   --bg: #eef1f4; --panel: rgba(255, 255, 255, 0.90); --text: #1d232b; --muted: #5b6573; --border: #d3d9e0;
   --ground: #e4e8df; --grid: #c3c9bd; --grid-major: #98a091; --building: #9e9e9e; --served: #008300;
   --unserved: #e34948; --inactive: #b4bac2; --drone: #2a78d6; --rotor: #1d4f91; --accent: #2a78d6;
+  --river: #2a78d6; --roof-lo: #c9c7c0; --roof-hi: #6b6a66;
 }
 :root[data-theme="dark"] {
   --bg: #0f1318; --panel: rgba(22, 27, 34, 0.90); --text: #e6ebf1; --muted: #9aa5b1; --border: #2c3540;
   --ground: #1a1f25; --grid: #2a323b; --grid-major: #44505c; --building: #6d737a; --served: #3fbf5f;
   --unserved: #ff6b6a; --inactive: #4a525c; --drone: #5aa2ff; --rotor: #9cc7ff; --accent: #5aa2ff;
+  --river: #5aa2ff; --roof-lo: #5b5f66; --roof-hi: #a9adb3;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0f1318; --panel: rgba(22, 27, 34, 0.90); --text: #e6ebf1; --muted: #9aa5b1; --border: #2c3540;
     --ground: #1a1f25; --grid: #2a323b; --grid-major: #44505c; --building: #6d737a; --served: #3fbf5f;
     --unserved: #ff6b6a; --inactive: #4a525c; --drone: #5aa2ff; --rotor: #9cc7ff; --accent: #5aa2ff;
+  --river: #5aa2ff; --roof-lo: #5b5f66; --roof-hi: #a9adb3;
   }
 }
 * { box-sizing: border-box; }
@@ -77,9 +80,12 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     <div><span class="dot" style="background: var(--unserved)"></span>not served</div>
     <div id="lg_inactive"><span class="dot" style="background: var(--inactive)"></span>not counted now (other site)</div>
     <div><span class="ring"></span>rescue user</div>
-    <div><span class="sq" style="background: var(--building)"></span>collapsed building</div>
+    <div><span class="sq" style="background: var(--building)"></span><span id="lg_building">collapsed building</span></div>
+    <div id="lg_river" style="display: none"><span class="sq" style="background: var(--river)"></span>river (flood band
+      outline dashed)</div>
     <div><span class="sq" style="background: var(--drone)"></span>drone, trail, line to its ground spot</div>
     <div class="note" id="scale_note"></div>
+    <div class="note" id="credit"></div>
   </div>
   <div id="bar">
     <button id="play" class="primary" type="button">Play</button>
@@ -174,6 +180,51 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     m.position.copy(W((x0 + x1) / 2, (y0 + y1) / 2, h / 2));
     scene.add(m);
   }
+  // real-place scenarios: OpenStreetMap footprints extruded to the heights the radio model uses (one merged mesh,
+  // shaded light -> dark by height), the flood river and the outline of the assumed flood band
+  if (D.place) {
+    const P = D.place, vtx = [], vcol = [];
+    const lo = col("--roof-lo"), hi = col("--roof-hi"), tmp = new THREE.Color();
+    const push = (a, c) => { vtx.push(a.x, a.y, a.z); vcol.push(c.r, c.g, c.b); };
+    for (const b of P.polys) {
+      const h = b[0], k = Math.floor((b.length - 1) / 2);
+      if (k < 3) continue;
+      tmp.copy(lo).lerp(hi, Math.min(1, h / (P.h_ref || 30)));
+      const ring = [];
+      for (let i = 0; i < k; i++) ring.push(new THREE.Vector2(b[1 + 2 * i], b[2 + 2 * i]));
+      if (ring.length > 3 && ring[0].equals(ring[ring.length - 1])) ring.pop();   // OSM rings repeat the first corner
+      if (ring.length < 3) continue;
+      for (const [a, c, d] of THREE.ShapeUtils.triangulateShape(ring, [])) {      // roof
+        push(W(ring[a].x, ring[a].y, h), tmp); push(W(ring[c].x, ring[c].y, h), tmp); push(W(ring[d].x, ring[d].y, h), tmp);
+      }
+      const wall = tmp.clone().multiplyScalar(0.82);
+      const n = ring.length;
+      for (let i = 0; i < n; i++) {                                                    // walls
+        const p = ring[i], q = ring[(i + 1) % n];
+        const a0 = W(p.x, p.y, 0), a1 = W(p.x, p.y, h), b0 = W(q.x, q.y, 0), b1 = W(q.x, q.y, h);
+        push(a0, wall); push(b0, wall); push(b1, wall); push(a0, wall); push(b1, wall); push(a1, wall);
+      }
+    }
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute("position", new THREE.Float32BufferAttribute(vtx, 3));
+    bg.setAttribute("color", new THREE.Float32BufferAttribute(vcol, 3));
+    bg.computeVertexNormals();
+    scene.add(new THREE.Mesh(bg, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })));
+    const line = (pts, color, z, dashed) => {
+      const g = new THREE.BufferGeometry().setFromPoints(pts.map(([x, y]) => W(x, y, z)));
+      const m = dashed ? new THREE.LineDashedMaterial({ color, dashSize: L * 0.006, gapSize: L * 0.004 })
+        : new THREE.LineBasicMaterial({ color });
+      const l = new THREE.Line(g, m);
+      if (dashed) l.computeLineDistances();
+      scene.add(l);
+    };
+    for (const r of P.rivers) line(r, col("--river"), 0.8, false);
+    for (const r of (P.band || [])) line(r, col("--river"), 0.9, true);
+    document.getElementById("lg_building").textContent = "building (OpenStreetMap footprint, model height)";
+    document.getElementById("lg_river").style.display = "flex";
+    document.getElementById("lg_inactive").lastChild.textContent = "not counted now (already taken off the roof / not yet at the shelter)";
+    document.getElementById("credit").textContent = P.credit || "";
+  }
 
   // survivors: one point each; rescue users also get a ring
   const U = D.users, n = U.n_drawn;
@@ -212,7 +263,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
     shownFrame = k;
     const f = U.frames[k];
     for (let i = 0; i < n; i++) {
-      const v = W(f.xy[2 * i], f.xy[2 * i + 1], 2.0);
+      const v = W(f.xy[2 * i], f.xy[2 * i + 1], U.z ? U.z[i] + 0.5 : 2.0);
       pos[3 * i] = v.x; pos[3 * i + 1] = v.y; pos[3 * i + 2] = v.z;
       const c = f.s[i] === "1" ? C_SERVED : (f.s[i] === "2" ? C_INACTIVE : C_UNSERVED);
       clr[3 * i] = c.r; clr[3 * i + 1] = c.g; clr[3 * i + 2] = c.b;

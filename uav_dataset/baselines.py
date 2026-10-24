@@ -290,7 +290,7 @@ class B3Obs(B3GridSearch):
 
     def score(self, env, X, Y, H, p_w):
         xy, probs = pseudo_population(env, *self.maps(env), n=env.sc["n_users"] if self.true_n else None)
-        return expected_coverage(env, xy, probs, X, Y, H, p_w, env.boxes if self.use_boxes else None)
+        return expected_coverage(env, xy, probs, X, Y, H, p_w, env.links if self.use_boxes else None)
 
 
 class B3ObsN(B3Obs):

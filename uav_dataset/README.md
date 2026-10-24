@@ -16,6 +16,8 @@ Read `../CLAUDE.md` first for the project rules, hypotheses (H1-H4) and gates.
     python view_run.py --seed 5 --profile hard --policy B3     # watch any scenario with any pilot (data/run.gif)
     python view_run.py --seed 9 --users 600 --clusters 4 --mobility surge --obstacles 6 --policy B2   # your own
     python run_baselines.py --profile hard                    # compare all baselines (Gate G3)
+    python view_run.py --seed 0 --profile place_kathmandu_bagmati --policy B6   # real place: Kathmandu, Bagmati floods
+    python nepal_case.py run --shard 0/2                      # case study (docs/case_nepal/); osm_place.py re-downloads
     pip install -r ../requirements-rl.txt && python rl_train.py   # train PPO (config: rl:), then rl_eval.py
     pip install -r ../requirements-dashboard.txt                # showcase + planning dashboard, then FROM THE REPO ROOT:
     streamlit run uav_dataset/dashboard.py                    # opens http://localhost:8501 (AI models: UAV_MODELS_DIR)

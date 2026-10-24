@@ -35,7 +35,7 @@ def snapshot(seed, x=None, y=None, h=None, max_pairs=60):
         x, y, h = b3.target
     h = h or md.CFG["baselines"]["altitude_m"]
     ux, uy = env.user_xy().T
-    g = md.channel_gain(ux, uy, np.array([x]), np.array([y]), np.array([h]), env.boxes)[0]
+    g = md.channel_gain(ux, uy, np.array([x]), np.array([y]), np.array([h]), env.links)[0]
     weak, strong = md.pair_users(g, env.sc["pairing"], np.random.default_rng(0))
     noma, oma = md.noma_rates(g, env.p_max_w, env.noise_psd, env.sc["bandwidth_hz"], env.sc["pairing"])
     sn, so = noma >= env.min_rate, oma >= env.min_rate
