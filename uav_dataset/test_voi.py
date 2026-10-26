@@ -7,6 +7,7 @@ import pytest
 
 import baselines as bl
 import make_dataset as md
+import run_baselines
 from baselines import B6GridAltitude, ReportsView, make_policy
 from uav_env import UAVEnv
 
@@ -71,9 +72,13 @@ def test_full_information_belief_is_the_true_users(prof):
 
 
 def test_old_pilots_unchanged():
-    """The default pilot list and B6's behaviour do not move (fingerprint taken with the code before this change)."""
-    assert list(bl.POLICIES) == ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B6fc", "B3obs", "B3obsU",
-                                 "B3obsUO", "B3obsN", "B3obsUN"]
+    """The pilot list holds no report pilot and B6's behaviour does not move (fingerprint taken with the code before
+    this change). The list includes the study pilots merged with this one (B6dep; B6r, B6true, B6meas)."""
+    assert list(bl.POLICIES) == ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B6r", "B6true", "B6meas", "B7", "B8",
+                                 "B6fc", "B6dep", "B3obs", "B3obsU", "B3obsUO", "B3obsN", "B3obsUN"]
+    assert not set(bl.REP_POLICIES) & set(bl.POLICIES)
+    # the default run list is unchanged by the merged study pilots
+    assert run_baselines.default_policies() == ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B6fc"]
     profile("hard")
     acts, cov = play(UAVEnv(scenario_overrides=SMALL), B6GridAltitude(), 3)
     digest = hashlib.sha1(np.round(acts, 12).tobytes() + np.round(cov, 12).tobytes()).hexdigest()

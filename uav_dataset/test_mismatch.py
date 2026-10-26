@@ -257,3 +257,41 @@ def test_mm_profiles_change_only_the_mismatch_section():
     assert md.CFG["env"]["access"] == "noma_opt" and md.CFG["uav"]["a_max_mps2"] == 4
     assert md.CFG["access"] == {"sic_eps": 0.05, "rescue_first": True}
     assert md.CFG["mobility"]["choices"] == ["static"]
+
+
+# ---------------------------------------------------------------- integration with the other merged studies
+def test_mismatch_is_refused_on_a_real_place():
+    """A real-place scenario (height-aware buildings) and the mismatch were never combined: the code must refuse it
+    loudly instead of silently ignoring the mismatch."""
+    md.apply_profile("place_kathmandu_bagmati")
+    env = UAVEnv(scenario_overrides={})
+    env.reset(seed=0)                                    # mismatch off: the place works as before
+    ux, uy = env.user_xy()[:6].T
+    X, Y, H = np.array([1000.0]), np.array([1000.0]), np.array([200.0])
+    with pytest.raises(NotImplementedError):
+        md.channel_gain(ux, uy, X, Y, H, env.place_links, excess_loss_db=25.0)
+    md.CFG["mismatch"]["hidden_obstacles"] = 2
+    with pytest.raises(NotImplementedError):
+        env.reset(seed=0)
+
+
+def test_cache_keys_ignore_pilot_only_sections_and_an_inactive_mismatch():
+    """oracle / hybrid caches: sections only other pilots read do not change the key (old caches stay valid); a
+    mismatch that is switched on does."""
+    import hybrid
+    import oracle
+    md.apply_profile("rl_static")
+    env = UAVEnv(scenario_overrides=SMALL)
+    env.reset(seed=1)
+    keys = (oracle._cache_key(env), hybrid._cache_key(env))
+    md.CFG["voi"]["f"] = 0.5
+    md.CFG["b6dep"]["top_k"] = 5
+    md.CFG["refine"]["max_moves_per_step"] = 3
+    md.CFG["b6meas"]["k"] = 5
+    md.CFG["mismatch"]["shadow_corr_m"] = 150.0          # a mismatch parameter, but the mismatch is still off
+    assert not md.mismatch_on()
+    assert (oracle._cache_key(env), hybrid._cache_key(env)) == keys
+    md.CFG["mismatch"]["hidden_obstacles"] = 2
+    assert md.mismatch_on()
+    new = (oracle._cache_key(env), hybrid._cache_key(env))
+    assert new[0] != keys[0] and new[1] != keys[1]
