@@ -29,6 +29,7 @@ import matplotlib
 matplotlib.use("Agg")
 import numpy as np
 import pandas as pd
+from matplotlib.collections import PolyCollection
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
@@ -57,6 +58,8 @@ PROFILE_INFO = {
     "hard": "Hard: 2 x 2 km, weak radio (20 dBm), 3-8 collapsed buildings, crowds that move suddenly, 16 Wh",
     "rl_static": "Still crowd (where the AI was trained): like hard, but people stand still",
     "rl_static_g20": "Still crowd, AI map 20 x 20 (same scenarios as rl_static)",
+    "place_kathmandu_bagmati": "Real place: Kathmandu, Bagmati floods (a scenario based on Sept 2024; OpenStreetMap "
+                               "buildings with heights, reconstructed crowd), 2 x 2 km, 20 dBm, 16 Wh",
 }
 MOBILITY_INFO = {
     "static": "Standing still",
@@ -65,6 +68,7 @@ MOBILITY_INFO = {
     "attraction": "People walk to a shelter",
     "hotspot_jump": "Groups suddenly jump to a new spot",
     "surge": "Panic: everyone runs to one new point",
+    "place": "Stranded on roofs, at shelters and on dry ground; rescue boats take some to a shelter",
 }
 ACCESS_INFO = {
     "noma_opt": "NOMA, adaptive: pairs share a channel, power tuned per pair",
@@ -90,7 +94,8 @@ PILOT_INFO = {
 }
 SLOW_PILOTS = ("B4", "B6")
 # Consistent colours (dataviz reference palette, categorical slots in fixed order; served/not served = status colours)
-COLORS = {"served": "#008300", "unserved": "#e34948", "drone": "#2a78d6", "building": "#9e9e9e", "pair": "#8a8a8a"}
+COLORS = {"served": "#008300", "unserved": "#e34948", "drone": "#2a78d6", "building": "#9e9e9e", "pair": "#8a8a8a",
+          "river": "#1f5fae"}
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
 METRICS = {   # name -> (plain label, higher is better)
     "coverage_full": ("share of people served over the whole episode (dead drone = 0)", True),
@@ -211,6 +216,14 @@ def build_scenario(settings):
 def describe(scn):
     """One plain sentence about a scenario from build_scenario / Episode.scenario."""
     sc = scn["sc"]
+    if sc.get("mobility") == "place":
+        return (f"{sc['n_users']} people (reconstructed, not real data): {sc['n_stranded']} stranded on roofs in the "
+                f"{sc['flood_band_m']:g} m flood band, {sc['n_shelter']} at {sc['n_shelters']} shelter(s), "
+                f"{sc['n_dry'] + sc['n_scatter']} on dry ground; from {sc['event_t0_s']} s rescue boats take "
+                f"{sc['event_share']:.0%} of the stranded to the nearest shelter. Real OpenStreetMap buildings, "
+                f"{scn['area_m'] / 1000:g} x {scn['area_m'] / 1000:g} km, radio {scn['p_max_dbm']:g} dBm, "
+                f"battery {scn['battery_wh']:g} Wh, {ACCESS_INFO[scn['access']].split(':')[0]}. "
+                "Map data (c) OpenStreetMap contributors (ODbL)")
     return (f"{sc['n_users']} people in {sc['n_clusters']} crowds, movement: "
             f"{MOBILITY_INFO.get(sc['mobility'], sc['mobility']).lower()}, {len(scn['boxes'])} collapsed buildings, "
             f"{scn['area_m'] / 1000:g} x {scn['area_m'] / 1000:g} km, radio {scn['p_max_dbm']:g} dBm, "
@@ -380,7 +393,7 @@ def _pairs(ep, i, max_pairs):
         return np.array([], int), np.array([], int)
     xy, _, (x, y, h), info, _ = ep.frames[i]
     with configured(ep.settings):
-        g = md.channel_gain(xy[:, 0], xy[:, 1], np.array([x]), np.array([y]), np.array([h]), env.boxes)[0]
+        g = md.channel_gain(xy[:, 0], xy[:, 1], np.array([x]), np.array([y]), np.array([h]), env.links)[0]
         if env.access == "noma":
             weak, strong = md.pair_users(g, env.sc["pairing"], np.random.default_rng(0))
         else:
@@ -392,8 +405,27 @@ def _pairs(ep, i, max_pairs):
     return weak[near], strong[near]
 
 
+def _draw_place(ax, env, compact=False):
+    """Real-place scenarios: OSM footprints (grey by height), the flood river and the band edge, the credit line."""
+    S = env.links.S
+    pc = PolyCollection([b["xy"] for b in S.buildings], array=S.heights, cmap="Greys", edgecolor="none", alpha=0.55,
+                        zorder=0)
+    pc.set_clim(-10, 35)
+    ax.add_collection(pc)
+    for r in S.rivers:
+        ax.plot(r[:, 0], r[:, 1], color=COLORS["river"], lw=1.6, zorder=0.5)
+    cc = (np.arange(S.n) + 0.5) * S.cell
+    ax.contour(cc, cc, S.dist.T, levels=[md.CFG["place"]["flood_band_m"]], colors=[COLORS["river"]], linewidths=0.7,
+               linestyles="--", zorder=0.5)
+    if not compact:
+        ax.text(0.99, 0.01, "Map data (c) OpenStreetMap contributors (ODbL)", transform=ax.transAxes, ha="right",
+                va="bottom", fontsize=6.5, color="0.35")
+
+
 def _draw_map(ax, env, xy, served, drone=None, trail=None, start=None, pairs=None, compact=False):
     L = env.L
+    if hasattr(env.links, "S"):
+        _draw_place(ax, env, compact)
     for x0, y0, x1, y1 in env.boxes:
         ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, color=COLORS["building"], alpha=0.75, lw=0))
     if pairs is not None:
@@ -424,11 +456,12 @@ def _draw_map(ax, env, xy, served, drone=None, trail=None, start=None, pairs=Non
         sp.set_color("0.8")
 
 
-def _legend(ax, pairs=False):
+def _legend(ax, pairs=False, place=False):
     items = [Line2D([], [], ls="", marker="o", color=COLORS["served"], label="served (good signal)"),
              Line2D([], [], ls="", marker="o", color=COLORS["unserved"], label="not served"),
              Line2D([], [], ls="", marker="o", mfc="none", mec="black", label="rescue user"),
-             Rectangle((0, 0), 1, 1, color=COLORS["building"], label="collapsed building"),
+             Rectangle((0, 0), 1, 1, color=COLORS["building"], label="building (OpenStreetMap)" if place
+                       else "collapsed building"),
              Line2D([], [], color=COLORS["drone"], marker="^", label="drone + flight path")]
     if pairs:
         items.append(Line2D([], [], color=COLORS["pair"], label="NOMA pair (shares a channel)"))
@@ -446,7 +479,7 @@ def render_frame(ep, t, show_pairs=False, max_pairs=60):
     _draw_map(ax, ep.env, xy, served, drone=(x, y), trail=trail, start=(ep.env.L / 2, ep.env.L / 2), pairs=pairs)
     ax.set_title(f"t = {info['t']} s   |   {info['coverage']:.0%} served   |   altitude {h:.0f} m   |   "
                  f"battery {info['battery_wh']:.1f} Wh", fontsize=10)
-    _legend(ax, pairs is not None and len(pairs[0]) > 0)
+    _legend(ax, pairs is not None and len(pairs[0]) > 0, hasattr(ep.env.links, "S"))
     return fig
 
 
@@ -598,7 +631,7 @@ def _served_at(env, x, y, h, p_w):
     """Who would be served with the drone at (x, y, h) and power p_w, right now (average channel). Same physics and
     rng recipe as UAVEnv.evaluate, but returns the per-user flags (to count rescue users too)."""
     ux, uy = env.user_xy().T
-    g = md.channel_gain(ux, uy, np.array([x]), np.array([y]), np.array([h]), env.boxes)[0]
+    g = md.channel_gain(ux, uy, np.array([x]), np.array([y]), np.array([h]), env.links)[0]
     if env.access in md.QOS_SCHEMES:
         return env.access_rates(g, p_w, return_info=True)[1]["served"]
     rng = np.random.default_rng([env.scenario_seed, env.t])
@@ -744,7 +777,7 @@ def render_plan(plan):
     ax.plot(env.L / 2, env.L / 2, "x", color="0.3", ms=9, zorder=7)
     ax.set_title(f"Recommended spot (star) at {plan.altitude_m:.0f} m: {plan.coverage[env.access]:.0%} served "
                  f"({ACCESS_INFO[env.access].split(':')[0]}); x = map centre", fontsize=10)
-    _legend(ax)
+    _legend(ax, place=hasattr(env.links, "S"))
     return fig
 
 
@@ -804,6 +837,11 @@ def flight3d(settings, pilot, wind=False, models_dir=None, max_users=FLIGHT3D_MA
         brng = np.random.default_rng([settings.seed, 32])
         buildings = [[round(float(v), 1) for v in b] + [round(float(brng.uniform(*BUILDING_HEIGHT_M)), 1)]
                      for b in env.boxes]
+        place_data, user_z = None, None
+        if hasattr(env.links, "S"):           # real place: OSM footprints with the radio model's heights, roof users
+            import place
+            place_data = place.payload3d(env.links.S)
+            user_z = np.round(env.links.pool_z[keep] - md.CFG["place"]["user_height_m"], 1).tolist()
         q = env.quad_cfg
         data = dict(
             v=1, L=float(env.L), steps=int(env.T), steps_flown=int(env.t), seed=int(settings.seed),
@@ -814,8 +852,9 @@ def flight3d(settings, pilot, wind=False, models_dir=None, max_users=FLIGHT3D_MA
                       tilt_max_deg=float(q["tilt_max_deg"]), scale=DRONE_SCALE),
             buildings=buildings, building_height_note="display only",
             users=dict(n_pool=int(n_pool), n_counted=int(env.sc["n_users"]), n_drawn=int(len(keep)),
-                       rescue="".join(np.where(env.rescue[keep], "1", "0").tolist()), frames=frames),
-            drone=drone, sec=sec,
+                       rescue="".join(np.where(env.rescue[keep], "1", "0").tolist()), frames=frames,
+                       **({} if user_z is None else dict(z=user_z))),
+            drone=drone, sec=sec, **({} if place_data is None else dict(place=place_data)),
             summary=dict(coverage_full=round(float(np.sum(sec["coverage"]) / env.T), 4),
                          survived=bool(env.t >= env.T), steps=int(env.t),
                          energy_wh=round(env.energy_used_j / 3600.0, 3),

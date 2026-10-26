@@ -56,17 +56,23 @@ def scenario_controls():
     profile = sb.selectbox("Scenario type", dc.profiles(), key="w_profile",
                            format_func=lambda p: f"{p}: {dc.PROFILE_INFO.get(p, '')}")
     d = dc.profile_defaults(profile)
+    real = "place" in d["mobility"]          # a real place: people, crowds and buildings come from the map
+    if real:
+        for k in ("w_users", "w_crowds", "w_mobility", "w_buildings"):
+            st.session_state[k] = None
+        sb.caption("Real place: the buildings come from OpenStreetMap and the crowd is reconstructed from the map "
+                   "(flood band, roofs, shelters), so the people / crowds / buildings controls are fixed.")
     seed = sb.number_input("Scenario number (seed)", 0, 1_000_000, key="w_seed",
                            help="Each number is a different random disaster. Same number = same disaster.")
-    users = sb.selectbox("People", [None, 100, 200, 300, 600, 1000, 1500], key="w_users",
+    users = sb.selectbox("People", [None, 100, 200, 300, 600, 1000, 1500], key="w_users", disabled=real,
                          format_func=lambda v: SEED_DECIDES if v is None else f"{v} people")
-    crowds = sb.selectbox("Crowds", [None, 1, 2, 3, 4, 5, 6], key="w_crowds",
+    crowds = sb.selectbox("Crowds", [None, 1, 2, 3, 4, 5, 6], key="w_crowds", disabled=real,
                           format_func=lambda v: SEED_DECIDES if v is None else f"{v} crowds")
-    mobility = sb.selectbox("How people move", [None, *dc.MOBILITY_INFO], key="w_mobility",
+    mobility = sb.selectbox("How people move", [None, *dc.MOBILITY_INFO], key="w_mobility", disabled=real,
                             format_func=lambda v: f"{SEED_DECIDES}: {', '.join(d['mobility'])}" if v is None
                             else dc.MOBILITY_INFO[v])
     lo, hi = d["obstacles"]
-    buildings = sb.selectbox("Collapsed buildings", [None, *range(0, 11)], key="w_buildings",
+    buildings = sb.selectbox("Collapsed buildings", [None, *range(0, 11)], key="w_buildings", disabled=real,
                              format_func=lambda v: f"{SEED_DECIDES}: {lo}-{hi}" if v is None else f"{v} buildings")
     sb.header("The drone")
     custom_bat = sb.checkbox(f"Custom battery (profile: {d['battery_wh']:g} Wh)", key="w_custom_bat")
@@ -106,7 +112,7 @@ def pilot_label(pid, opts):
 
 def slow_note(pilots, settings):
     slow = [p for p in pilots if p in dc.SLOW_PILOTS]
-    if slow and settings.profile in ("hard", "bigarea", "rl_static", "rl_static_g20"):
+    if slow and settings.profile in ("hard", "bigarea", "rl_static", "rl_static_g20", "place_kathmandu_bagmati"):
         st.caption(f"{', '.join(slow)} search(es) many spots: up to ~40 s per run on a 2 x 2 km map.")
 
 

@@ -65,6 +65,57 @@ sites:
   burst_speed_mps: [1.0, 3.0]   # ... at this speed; 3 m/s is the cap for every user (D-52)
   max_draws: 256                # rejection-sampling batch for site placement (deterministic, seeded)
 
+# Real-place case study (book: case study "Kathmandu, Bagmati floods"; docs/case_nepal/). Used ONLY when a scenario's
+# mobility model is `place` (profile place_kathmandu_bagmati); every other scenario ignores these two sections, so the
+# old datasets and results are bit-exact. Map data (c) OpenStreetMap contributors, ODbL 1.0 (osm_place.py downloads it
+# once; the processed file places/<name>.json is committed). The crowd is RECONSTRUCTED from the map with the
+# assumptions below: "a scenario based on ...", never "real data" (survivor positions are not published anywhere).
+places:
+  kathmandu_bagmati:
+    title: a scenario based on the September 2024 Kathmandu (Bagmati river) floods
+    centre_deg: [27.6900, 85.3070]   # Teku / Kuleshwor reach of the Bagmati (Balkhu at the west edge, Thapathali at
+                                     # the east edge); the box is side_m x side_m around this centre
+    side_m: 2000                     # = area_m of the profile
+    rivers: [Bagmati]                # waterway names (OSM name or name:en) that define the flood band
+place:
+  name: kathmandu_bagmati
+  levels_m: 3.0                 # ENGINEERING ASSUMPTION: storey height for building:levels (range 2.8-3.5 m)
+  default_height: empirical     # buildings without a height/levels tag: `empirical` = drawn from the tagged buildings
+                                # of the same box (if at least min_tagged), else uniform in default_height_range_m
+  min_tagged: 100
+  default_height_range_m: [6, 12]   # ENGINEERING ASSUMPTION (2-4 storeys), used only if too few buildings are tagged
+  max_plausible_height_m: 45    # ENGINEERING ASSUMPTION (data cleaning): a tag above this (15 storeys) is treated as a
+                                # tagging error and refilled like a missing height (Kathmandu box: one 25-storey tag)
+  height_seed: 0                # seed of the missing-height draws (fixed: the city does not change between scenarios)
+  raster_m: 2.0                 # ENGINEERING CHOICE: height-raster cell (range 1-5 m); also the ray sampling step
+  los_model: geometric          # geometric = the ray test REPLACES Al-Hourani's P_LoS: clear -> eta_LoS, blocked ->
+                                # eta_NLoS (a2g section). statistical = Al-Hourani's mean loss kept + obstacles.
+                                # excess_loss_db on a blocked ray (the rectangle rule; sensitivity only)
+  dist_grid_m: 10.0             # ENGINEERING CHOICE: river-distance field computed exactly every 10 m, bilinear between
+  display_simplify_m: 1.0       # DISPLAY ONLY (3D page): footprint simplification tolerance, m
+  display_max_buildings: null   # DISPLAY ONLY: cap on 3D footprints (largest first); null = all
+  user_height_m: 1.5           # ENGINEERING ASSUMPTION: handset height above the ground or the roof it stands on
+  # Flood and people (all ENGINEERING ASSUMPTIONS; no satellite flood map is used)
+  flood_band_m: 200             # "flooded" = within this distance of the river centreline (sensitivity 150-300)
+  dry_ring_m: 300               # "higher/drier ground just outside": band edge .. band edge + this
+  n_users_choices: [300, 600, 1000]
+  stranded_share_range: [0.3, 0.5]    # on rooftops of buildings inside the flood band (z = roof + user_height_m)
+  shelter_share_range: [0.2, 0.4]     # at dry shelter candidates (open ground within shelter_radius_m)
+  scatter_fraction_range: [0.05, 0.10]  # open ground anywhere outside the band; the rest = dry-ground groups
+  dry_groups_range: [2, 4]            # dry-ground gatherings (Gaussian, std dry_group_std_m, on open ground)
+  dry_group_std_m: [40, 100]
+  shelter_radius_m: 60
+  shelter_max_dist_m: 600       # shelters used by the crowd: dry candidates at most this far beyond the band edge
+  n_shelters_max: 4             # the crowd uses at most this many dry shelters (the largest-weight ones)
+  shelter_kinds: [school, college, university, hospital, community_centre, assembly_point, park, place_of_worship]
+  stranded_rescue_share: 0.40   # share of class `rescue` among stranded users (range 0.2-0.6); others: base class mix
+  # Evacuation event (the competing-sites mechanism of D-52: the boat trip itself is not simulated): from t0 a share of
+  # the stranded users is taken to the NEAREST used shelter; mover k switches at t0 + tau * k / n_move.
+  event: true
+  t0_range_s: [60, 150]
+  tau_s: 120
+  evac_share_range: [0.3, 0.6]
+
 # radio
 fc_hz: 2000000000
 bandwidth_per_user_hz: 50000    # total bandwidth = n_users x this (200 users -> 10 MHz); keeps per-user rates comparable
@@ -317,6 +368,18 @@ profiles:
   # G5 training cells with the ANNOUNCED schedule (owner, D-54): the AI sees event_countdown + event_announce
   sites_d20_t0_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 0, announced: true}}
   sites_d20_t60_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 60, announced: true}}
+
+  # Real-place case study (docs/case_nepal/): Kathmandu, Bagmati floods (a scenario based on Sept 2024), OSM buildings
+  # as height-aware obstacles, the reconstructed flood crowd (section `place:`) and the owner's G5 settings (D-48).
+  place_kathmandu_bagmati:
+    area_m: 2000
+    uav: {p_max_dbm: 20, a_max_mps2: 4}
+    mobility: {choices: [place]}
+    energy: {battery_wh: 16}
+    baselines: {grid_n: 14}
+    env: {access: noma_opt}
+    access: {sic_eps: 0.05, rescue_first: true}
+    place: {name: kathmandu_bagmati}
 
 # Reinforcement learning (Gate G4). Train on the training seeds only; pick models on val; touch test once at the end.
 rl:
