@@ -24,8 +24,8 @@ the report and the viva. Chapter 12 is a glossary of every term.
 | 4 | [The simulator](04-simulator.md) | The physics: crowds, movement, buildings, the radio channel, NOMA, energy |
 | 5 | [The dataset](05-dataset.md) | The generated tables, the Excel file, what is in every column, versions |
 | 6 | [The game and the AI](06-game-and-ai.md) | The Gymnasium environment, the controls, the reward, the training pipeline |
-| 7 | [Baselines and their results](07-baselines.md) | The seven simple pilots and every comparison table |
-| 8 | [AI experiments](08-ai-experiments.md) | Every training run, what it showed, and the diagnosis of each failure |
+| 7 | [Baselines and their results](07-baselines.md) | The simple pilots and every comparison table; the location-information and anticipation studies; the Kathmandu case study |
+| 8 | [AI experiments](08-ai-experiments.md) | Every training run, what it showed, and the diagnosis of each failure; the hybrid timing AI; the AI under wrong physics |
 | 9 | [Engineering](09-engineering.md) | Repository, branches, pull requests, tests, CI, every command, troubleshooting |
 | 10 | [What is verified and what is not](10-verification.md) | Parameters checked against papers, assumptions, known gaps |
 | 11 | [Outlook](11-outlook.md) | Roadmap, novelty and related work, the real-world gap, hardware path, business track |

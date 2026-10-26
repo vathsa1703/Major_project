@@ -62,6 +62,7 @@ New decisions are appended with the next number. A decision is never deleted; if
 | D-54 | 10-23 | The AI may use the announced schedule; it gets the same announcement contents as the forecasting pilot B6fc | Owner |
 | D-55 | 10-23 | G5 rules pre-registered before any training: cells, controls, budget, bar, pass mark, NOMA vs OMA report | Owner + Claude |
 | D-56 | 10-23 | After G5 round 1 (AI lost): drop round 2; adopt the anticipation rule and the value-of-location-information study as the contributions; try a hybrid timing AI; OpenStreetMap as demo/final test; stay focused (no general drone platform) | Owner |
+| D-57 | 10-26 | GO for a small "find-and-serve" study: the drone locates survivors' phones from their uplink signal strength, then serves them with NOMA; simulation only, independent design review, pass marks pre-registered before any result | Owner |
 
 ---
 
@@ -405,3 +406,14 @@ G5 round 1 showed every full AI below the bar (8.9). The owner decided to finish
    general "test any drone" platform (a friend's crop-spraying drone gave the idea) stays out of scope (backlog, business
    track); "connect and locate survivors from their phones" goes into future work and the business track.
 
+### D-57 GO for the find-and-serve study (2026-10-26)
+**Question.** D-56 put "connect and locate survivors from their phones" into future work. After the four studies finished
+(7.14-7.16, 8.10-8.11), should it become a study of its own before the project closes?
+**Decision.** The owner gave the GO on 2026-10-26 for a **small** study: the drone first **finds** people from the signal
+strength of their phones' uplink (a phone that attaches to the drone reveals how strongly the drone hears it, even if it never
+sends a GPS report; 7.14 assumed such phones are invisible), and then **serves** them with NOMA. Conditions: simulation only;
+the design is reviewed by an independent agent before anything is run; the pass marks are pre-registered before any result.
+A real deployment needs operator and regulator partners (spectrum, emergency-location rules, flying permits) and is out of
+scope.
+**Consequence.** Built and reviewed now on its own branch (`search/find-serve`) and pre-registered before any result; its
+outcome will be recorded in a later section of this book, whatever it is.
