@@ -136,8 +136,9 @@ resolved: `oracle._cache_key` (both B6dep's and the hybrid's new sections exclud
 pilots both kept, one pilot list); `make_dataset.channel_gain` and `uav_env` (the real-place links of #22 and the mismatch's
 true world both kept; mismatch + real place raises `NotImplementedError`, the combination was never built). Integration
 fixes in the same branch: three over-long lines (ruff), the oracle / hybrid cache keys ignore the new pilot-only sections
-and an inactive mismatch (old caches stay valid), `run_baselines.default_policies()` keeps the default run list unchanged,
-and `test_voi`'s pinned pilot list now includes the merged pilots.
+and an inactive mismatch (old caches stay valid), `run_baselines.default_policies()` keeps the default run list unchanged
+(`test_accel_loiter` checked this by reading the source text of `main()`; it now checks the list itself), and `test_voi`'s
+pinned pilot list now includes the merged pilots.
 
 The first commit (`4cd4cc4`, 2026-10-15) imported the generator, environment and 52 tests directly to `main` (the repository was
 empty); everything after went through pull requests.

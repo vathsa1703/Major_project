@@ -603,8 +603,9 @@ No AI was trained.
 - **Sensitivity:** with the rectangle rule instead of the ray test (`los_model: statistical`, which counts the buildings twice)
   B6 falls to 0.636 but NOMA still gains +0.141; the flood-band width (150 / 300 m) moves B6 by less than 0.02.
 
-**Flag: altitude.** B6 flies at about **290 m** (the top of the simulator's 50-300 m range) in both profiles, because from high
-up the rays clear the roofs. Civil drone rules in many countries cap small drones at about 120 m above ground (we did not
+**Flag: altitude.** B6 flies at about **290 m** (the top of the simulator's 50-300 m range; mean altitude over the episode
+on the Kathmandu map 286 m with NOMA and 290 m with OMA, on `hard_g5` 286 / 278 m; `docs/case_nepal/episodes.csv`, column
+`mean_h`), because from high up the rays clear the roofs. Civil drone rules in many countries cap small drones at about 120 m above ground (we did not
 check Nepal's rule from a primary source). A drone held at 120 m would see more blocked rays, so these coverage numbers are
 optimistic for a legal flight; a 120 m cap is an easy sensitivity run that has not been done.
 
