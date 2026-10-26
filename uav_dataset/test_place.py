@@ -22,6 +22,8 @@ PROFILE = "place_kathmandu_bagmati"
 @pytest.fixture(autouse=True)
 def back_to_default():
     yield
+    # apply_profile only overwrites keys, so keys a test added to a profile would survive the reset: restore them too
+    md.CFG["profiles"] = copy.deepcopy(md.BASE_CFG["profiles"])
     md.apply_profile("default")                      # a profile must never leak into other tests
 
 
