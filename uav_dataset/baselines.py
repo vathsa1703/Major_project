@@ -16,6 +16,7 @@ capped maps; uncapped maps; plus obstacles; full truth), to tell whether the age
 All settings are in config.yaml under `baselines:`.
 """
 import hashlib
+import itertools
 
 import numpy as np
 
@@ -783,6 +784,226 @@ class B6Depart(B6Forecast):
         return env.evaluate_users(xy, mr, rs, nodes[:, 0], nodes[:, 1], nodes[:, 2], p_w, tt)
 
 
+# ---------------------------------------------------------------- model mismatch: B6r, B6true, B6meas
+def refine_spot(env, x, y, h, p_w, model="nominal", value=None):
+    """Off-grid pattern search around (x, y, h) on a MODEL (env.evaluate(..., model=model)): at each probe distance s
+    of refine.steps_m (coarse to fine) score the 8 horizontal neighbours at s and the 2 altitude neighbours at +/- s/2
+    (clipped to the map and the altitude limits) in one vectorised call; move to the best one while it is strictly
+    better, then go to the next (smaller) s. Returns (x, y, h, coverage). Deterministic (ties: the first neighbour)."""
+    rc, u = md.CFG["refine"], env.uav
+    if value is None:
+        value = float(env.evaluate([x], [y], [h], p_w, model=model)[0])
+    dirs = np.array([[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]], dtype=float)
+    for s in rc["steps_m"]:
+        for _ in range(int(rc["max_moves_per_step"])):
+            NX = np.clip(np.r_[x + dirs[:, 0] * s, x, x], 0.0, env.L)
+            NY = np.clip(np.r_[y + dirs[:, 1] * s, y, y], 0.0, env.L)
+            NH = np.clip(np.r_[np.full(len(dirs), h), h + s / 2, h - s / 2], u["h_min_m"], u["h_max_m"])
+            cov = env.evaluate(NX, NY, NH, p_w, model=model)
+            j = int(np.argmax(cov))
+            if cov[j] <= value + 1e-12:
+                break
+            x, y, h, value = float(NX[j]), float(NY[j]), float(NH[j]), float(cov[j])
+    return x, y, h, value
+
+
+class B6Refined(B6GridAltitude):
+    """B6r: B6 (grid x altitude levels, every K steps, on the NOMINAL model) plus an off-grid pattern search
+    (refine_spot) from the chosen candidate. Separates 'finer placement' from 'knows the true channel'."""
+    name = "B6r"
+    model = "nominal"
+
+    def plan(self, env):
+        CX, CY, CH = self.candidates(env)
+        p_w = env.p_max_w * self.power
+        cov = env.evaluate(CX, CY, CH, p_w, model=self.model)
+        j = self.pick(env, cov, CX, CY, CH)
+        x, y, h, _ = refine_spot(env, CX[j], CY[j], CH[j], p_w, self.model, value=float(cov[j]))
+        self.target = (x, y, h)
+
+
+class B6True(B6Refined):
+    """B6true (UPPER BOUND, not a fair competitor): B6r scoring on the TRUE channel (env.evaluate(model="true")):
+    it knows the shadowing map, the true building loss and the hidden buildings. Equal to B6r without mismatch."""
+    name = "B6true"
+    model = "true"
+
+
+class MeasuredView:
+    """The ONLY window B6meas has on the world (level-1 information parity with the AI): its own state, the clock, the
+    NOMINAL model (env.evaluate(model="nominal") on the users now, like B6) and the aggregate coverage the drone
+    measured in the last second (env.prev["coverage"], the AI's `prev` observation). Anything else raises."""
+    _ALLOWED = ("x", "y", "h", "vx", "vy", "vz", "t", "dt", "L", "T", "uav", "p_max_w")
+
+    def __init__(self, env):
+        object.__setattr__(self, "_env", env)
+
+    def __getattr__(self, k):
+        if k in MeasuredView._ALLOWED:
+            return getattr(object.__getattribute__(self, "_env"), k)
+        raise AttributeError(f"B6meas may not read env.{k}")
+
+    def evaluate(self, X, Y, H, p_w):
+        return object.__getattribute__(self, "_env").evaluate(X, Y, H, p_w, model="nominal")
+
+    def measured_coverage(self):
+        return float(object.__getattribute__(self, "_env").prev["coverage"])
+
+
+def leg_time(ax, ay, ah, bx, by, bh, uav):
+    """Rough flight time (s) between two spots: horizontal at v_max, then vertical at vz_max (tour ordering only)."""
+    return float(np.hypot(bx - ax, by - ay) / uav["v_max_mps"] + abs(bh - ah) / uav["vz_max_mps"])
+
+
+class B6Measured(B6GridAltitude):
+    """B6meas: model-based proposal, measurement-based choice. Learning-free; level-1 information (MeasuredView):
+    the nominal model + the aggregate coverage it measures each second where it flies. Same flight cost as everyone.
+      1. survey  : B6's candidates scored on the NOMINAL model; the top-k spots at least min_sep_m apart (each at its
+                   best nominal altitude) are visited in the shortest open tour from the drone (brute force, k <= 5),
+                   and the coverage is measured for dwell_s seconds at each.
+      2. refine  : from the best MEASURED spot, a measured pattern search: probes at s = b6meas.steps_m (4 compass
+                   points, and altitude +/- s/2 if alt_probes) visited in nearest-neighbour order, probe_dwell_s each;
+                   the first probe that beats the centre by improve_min becomes the centre (the drone is already
+                   there) and the probes are rebuilt around it at the same s; otherwise the next smaller s. Only
+                   improving moves are kept.
+      3. hold    : fly to the centre and stay. Every recheck_s, if the measured coverage fell by more than
+                   recheck_drop below the committed value (the crowd moved), restart from 1.
+    It never reads the true channel, the shadowing map, the true building loss or the hidden buildings."""
+    name = "B6meas"
+
+    def reset(self, env):
+        super().reset(env)
+        self.c = md.CFG["b6meas"]
+        self.steps = list(self.c.get("steps_m") or md.CFG["refine"]["steps_m"])
+        self.mode, self.queue, self.samples, self.leg_t = "start", [], [], 0
+        self.measured, self.center, self.center_val, self.scale_i, self.t_commit = {}, None, None, 0, None
+        self.log = []                                     # (t, mode, x, y, h, measured value) for reports and tests
+        self.last_sample_t = -1
+
+    def act(self, env):
+        return self._act(MeasuredView(env))
+
+    # -- steps
+    def start_survey(self, v):
+        c = self.c
+        CX, CY, CH = self.candidates(v)
+        cov = v.evaluate(CX, CY, CH, v.p_max_w * self.power)
+        d = np.hypot(CX - v.x, CY - v.y)
+        order = np.lexsort((d, -cov))                     # best nominal first; ties: the closest
+        picks = []
+        for j in order:
+            if all(np.hypot(CX[j] - CX[i], CY[j] - CY[i]) >= c["min_sep_m"] for i in picks):
+                picks.append(int(j))
+            if len(picks) == int(c["k"]):
+                break
+        spots = [(float(CX[j]), float(CY[j]), float(CH[j])) for j in picks]
+        best, best_t = None, np.inf
+        for perm in itertools.permutations(range(len(spots))):
+            pos, tt = (v.x, v.y, v.h), 0.0
+            for i in perm:
+                tt += leg_time(*pos, *spots[i], v.uav)
+                pos = spots[i]
+            if tt < best_t - 1e-9:
+                best, best_t = perm, tt
+        self.queue = [(*spots[i], int(c["dwell_s"])) for i in best]
+        self.mode, self.measured, self.samples, self.leg_t = "survey", {}, [], 0
+
+    def probes(self, v):
+        """Unmeasured probes around the centre at the current scale, in nearest-neighbour order from the drone."""
+        s = float(self.steps[self.scale_i])
+        x, y, h = self.center
+        u = v.uav
+        pts = [(float(np.clip(x + dx * s, 0, v.L)), float(np.clip(y + dy * s, 0, v.L)), h)
+               for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+        if self.c["alt_probes"]:
+            pts += [(x, y, float(np.clip(h + dh * s / 2, u["h_min_m"], u["h_max_m"]))) for dh in (1, -1)]
+        pts = [p for p in dict.fromkeys(pts) if p != self.center and self.key(p) not in self.measured]
+        out, pos = [], (v.x, v.y, v.h)
+        while pts:
+            i = int(np.argmin([leg_time(*pos, *p, u) for p in pts]))
+            pos = pts.pop(i)
+            out.append((*pos, int(self.c["probe_dwell_s"])))
+        return out
+
+    @staticmethod
+    def key(p):
+        return tuple(round(float(a), 3) for a in p[:3])
+
+    def next_scale(self, v):
+        """Probes at the current scale, or at the next smaller scales; when none are left, hold at the centre."""
+        while self.scale_i < len(self.steps):
+            self.queue = self.probes(v)
+            if self.queue:
+                return
+            self.scale_i += 1
+        self.mode, self.t_commit, self.queue = "hold", v.t, []
+
+    def on_measured(self, v, wp, value):
+        self.measured[self.key(wp)] = value
+        self.log.append((v.t, self.mode, *wp[:3], value))
+        self.queue.pop(0)
+        if self.mode == "survey":
+            if not self.queue:
+                k = max(self.measured, key=self.measured.get)
+                self.center, self.center_val, self.scale_i, self.mode = k, self.measured[k], 0, "refine"
+                self.next_scale(v)
+            return
+        if value > self.center_val + self.c["improve_min"]:           # refine: keep only improving moves
+            self.center, self.center_val = self.key(wp), value
+            self.next_scale(v)
+        elif not self.queue:
+            self.scale_i += 1
+            self.next_scale(v)
+
+    def _act(self, v):
+        c, tol = self.c, float(self.c["arrive_tol_m"])
+        if self.mode == "start":
+            self.start_survey(v)
+        if self.mode == "hold":
+            x, y, h = self.center
+            here = abs(v.x - x) <= tol and abs(v.y - y) <= tol and abs(v.h - h) <= tol
+            if here and v.t > 0 and (v.t - self.t_commit) % int(c["recheck_s"]) == 0 and v.t > self.t_commit:
+                if v.measured_coverage() < self.center_val - c["recheck_drop"]:
+                    self.start_survey(v)
+        while self.mode in ("survey", "refine") and self.queue:
+            wp = self.queue[0]
+            arrived = abs(v.x - wp[0]) <= tol and abs(v.y - wp[1]) <= tol and abs(v.h - wp[2]) <= tol
+            if arrived:
+                if v.t > 0 and v.t != self.last_sample_t:     # one measurement per second, at this spot
+                    self.samples.append(v.measured_coverage())
+                    self.last_sample_t = v.t
+            else:
+                self.leg_t += 1
+                if self.leg_t > c["max_leg_s"]:          # never reached: drop it unmeasured
+                    self.queue.pop(0)
+                    self.samples, self.leg_t = [], 0
+                    if not self.queue:
+                        self.on_empty(v)
+                    continue
+            if len(self.samples) >= wp[3]:
+                self.on_measured(v, wp, float(np.mean(self.samples)))
+                self.samples, self.leg_t = [], 0
+                continue                                  # the next waypoint (the drone may already be there)
+            break
+        if self.mode == "hold" or not self.queue:
+            self.target = self.center
+        else:
+            self.target = self.queue[0][:3]
+        return go_to(v, *self.target, self.power)
+
+    def on_empty(self, v):
+        if self.mode == "survey":
+            if self.measured:
+                k = max(self.measured, key=self.measured.get)
+                self.center, self.center_val, self.scale_i, self.mode = k, self.measured[k], 0, "refine"
+                self.next_scale(v)
+            else:
+                self.start_survey(v)
+        else:
+            self.scale_i += 1
+            self.next_scale(v)
+
+
 class B4PSO(Policy):
     """B4: particle swarm over (x, y, altitude, power) every K steps.
     Objective = the env's v2 reward at the candidate."""
@@ -981,7 +1202,8 @@ class B3Reports(_Reports, B3GridSearch):
 
 
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
-            "B6": B6GridAltitude, "B7": B7Loiter, "B8": B8BatteryAware, "B6fc": B6Forecast, "B6dep": B6Depart,
+            "B6": B6GridAltitude, "B6r": B6Refined, "B6true": B6True, "B6meas": B6Measured,
+            "B7": B7Loiter, "B8": B8BatteryAware, "B6fc": B6Forecast, "B6dep": B6Depart,
             "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles,
             "B3obsN": B3ObsN, "B3obsUN": B3ObsUncappedN}
 # Parametrised pilots, NOT in POLICIES (so no default run list changes). Name them as "B6rep:f=0.2,sigma=10,age=30".

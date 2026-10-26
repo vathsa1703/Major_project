@@ -428,7 +428,7 @@ def seeds(split):
 
 
 # ---------------------------------------------------------------- channel + NOMA
-def channel_gain(ux, uy, X, Y, H, boxes=None, rng=None, fading=None):
+def channel_gain(ux, uy, X, Y, H, boxes=None, rng=None, fading=None, excess_loss_db=None, shadow=None):
     """Linear power gain from drone(s) at (X,Y,H) to users (ux,uy).
     X,Y,H are arrays of shape (P,). Returns (P, N).
     Mean path loss = FSPL + P_LoS*eta_LoS + (1-P_LoS)*eta_NLoS (Al-Hourani).
@@ -440,9 +440,15 @@ def channel_gain(ux, uy, X, Y, H, boxes=None, rng=None, fading=None):
     enter the distance and elevation angle, and a ray test through the building height grid decides each link
     (place.los_model): `geometric` = the ray test REPLACES Al-Hourani's P_LoS (clear -> eta_LoS, blocked -> eta_NLoS;
     with fading on, the link is LoS/Rician exactly when the ray is clear); `statistical` = Al-Hourani's mean loss plus
-    obstacles.excess_loss_db on a blocked ray (the rectangle rule)."""
+    obstacles.excess_loss_db on a blocked ray (the rectangle rule).
+    Model mismatch (only the TRUE world passes these; None = the textbook model, bit-exact as before):
+    excess_loss_db: the loss of a blocked link instead of obstacles.excess_loss_db.
+    shadow: (z, sigma_db), z (N,) = the user's unit-variance shadowing value (user-side field, ShadowField.at);
+    the link gets z * shadow_sigma(theta, sigma_db) extra dB (smaller at higher elevation angles)."""
     a2g = CFG["a2g"]
     if boxes is not None and hasattr(boxes, "los_clear"):
+        if excess_loss_db is not None or shadow is not None:    # not combined yet: fail loudly, never silently
+            raise NotImplementedError("model mismatch (excess_loss_db / shadow) is not defined for real-place links")
         return _place_gain(ux, uy, X, Y, H, boxes, rng, fading)
     dx = ux[None, :] - X[:, None]
     dy = uy[None, :] - Y[:, None]
@@ -460,7 +466,11 @@ def channel_gain(ux, uy, X, Y, H, boxes=None, rng=None, fading=None):
     else:
         pl_db = fspl + p_los * a2g["eta_los_db"] + (1 - p_los) * a2g["eta_nlos_db"]
     if boxes is not None and len(boxes):
-        pl_db = pl_db + CFG["obstacles"]["excess_loss_db"] * link_blocked(ux, uy, X, Y, boxes)
+        loss = CFG["obstacles"]["excess_loss_db"] if excess_loss_db is None else excess_loss_db
+        pl_db = pl_db + loss * link_blocked(ux, uy, X, Y, boxes)
+    if shadow is not None:
+        z, sigma_db = shadow
+        pl_db = pl_db + np.asarray(z, dtype=float)[None, :] * shadow_sigma(theta, sigma_db)
     return 10 ** (-pl_db / 10) * fade
 
 
@@ -493,6 +503,80 @@ def _place_gain(ux, uy, X, Y, H, links, rng=None, fading=None):
         cn = (rng.normal(size=d.shape) + 1j * rng.normal(size=d.shape)) / np.sqrt(2)
         fade = np.where(los, np.abs(np.sqrt(K / (K + 1)) + cn / np.sqrt(K + 1)) ** 2, np.abs(cn) ** 2)
     return 10 ** (-pl_db / 10) * fade
+
+
+# ---------------------------------------------------------------- model mismatch (the TRUE world vs the textbook)
+# Config `mismatch:`. With every option at its default (sigma 0, excess_loss_db null, hidden_obstacles 0) nothing
+# below is used and the game is the old one, bit for bit. Each perturbation has its OWN rng stream
+# (scenario seed, stream id, mismatch.draw), so switching one on never changes the others, and `draw` re-draws the
+# perturbation for the same scenario (memorisation check).
+MM_STREAM_SHADOW, MM_STREAM_HIDDEN = 101, 103
+
+
+def mismatch_cfg():
+    return CFG.get("mismatch") or {}
+
+
+def mismatch_on():
+    m = mismatch_cfg()
+    return bool(m.get("shadow_sigma_db", 0.0) or m.get("excess_loss_db") is not None
+                or m.get("hidden_obstacles", 0))
+
+
+def shadow_sigma(theta_deg, sigma_db):
+    """Elevation-dependent shadowing std (dB): sigma_db * (1 - theta / 90). Full at grazing angles, 0 straight
+    overhead (the user's surroundings block a low link more often). ENGINEERING ASSUMPTION (linear form; published A2G
+    models use a std that falls with elevation, e.g. the Al-Hourani Globecom 2014 / 3GPP TR 36.777 Annex B shadow-fading
+    tables: TO BE READ, not verified)."""
+    return sigma_db * (1.0 - np.clip(theta_deg, 0.0, 90.0) / 90.0)
+
+
+class ShadowField:
+    """A fixed, spatially correlated, unit-variance Gaussian field over the map (the user's surroundings), one per
+    scenario and draw. White noise on a grid of spacing corr_m * res_frac, smoothed by a Gaussian kernel of std corr_m/2
+    (so the correlation exp(-d^2 / corr_m^2) falls to 1/e at d = corr_m), normalised by the kernel's norm (unit variance
+    in expectation, not per map: a scenario may be darker or brighter overall). Users read it by bilinear interpolation
+    at their own position. Vectorised; seeded (rng stream [seed, MM_STREAM_SHADOW, draw])."""
+
+    def __init__(self, seed, L, corr_m, res_frac=0.25, draw=0):
+        self.L, self.corr = float(L), float(corr_m)
+        self.dx = self.corr * float(res_frac)
+        s = self.corr / 2.0 / self.dx                         # kernel std in cells
+        r = int(np.ceil(4 * s))
+        n = int(np.ceil(self.L / self.dx)) + 1                # grid nodes 0, dx, ..., >= L
+        rng = np.random.default_rng([int(seed), MM_STREAM_SHADOW, int(draw)])
+        w = rng.standard_normal((n + 2 * r, n + 2 * r))
+        k = np.exp(-0.5 * (np.arange(-r, r + 1) / s) ** 2)
+        k /= np.sqrt(np.sum(k ** 2))                          # unit variance after the 2-D filter outer(k, k)
+        # separable convolution, 'valid' part only (the padding r keeps the edges as random as the middle)
+        rows = np.apply_along_axis(lambda v: np.convolve(v, k, mode="valid"), 1, w)
+        self.z = np.apply_along_axis(lambda v: np.convolve(v, k, mode="valid"), 0, rows)   # (n, n), x index major
+        self.n = n
+
+    def at(self, ux, uy):
+        """Field value at user positions (bilinear interpolation; positions clipped to the map)."""
+        fx = np.clip(np.asarray(ux, dtype=float), 0.0, self.L) / self.dx
+        fy = np.clip(np.asarray(uy, dtype=float), 0.0, self.L) / self.dx
+        i0 = np.minimum(np.floor(fx).astype(int), self.n - 2)
+        j0 = np.minimum(np.floor(fy).astype(int), self.n - 2)
+        tx, ty = fx - i0, fy - j0
+        z = self.z
+        return ((1 - tx) * (1 - ty) * z[i0, j0] + tx * (1 - ty) * z[i0 + 1, j0]
+                + (1 - tx) * ty * z[i0, j0 + 1] + tx * ty * z[i0 + 1, j0 + 1])
+
+
+def hidden_obstacles(seed, n, draw=0):
+    """(n, 4) extra collapsed-building rectangles that exist in the TRUE world only (absent from the planner's map).
+    Same size range and placement rule as make_obstacles, own rng stream [seed, MM_STREAM_HIDDEN, draw]."""
+    if n <= 0:
+        return np.zeros((0, 4))
+    rng = np.random.default_rng([int(seed), MM_STREAM_HIDDEN, int(draw)])
+    L = CFG["area_m"]
+    lo, hi = CFG["obstacles"]["size_range_m"]
+    w, h = rng.uniform(lo, hi, size=n), rng.uniform(lo, hi, size=n)
+    cx, cy = rng.uniform(0, L, size=n), rng.uniform(0, L, size=n)
+    return np.column_stack([np.clip(cx - w / 2, 0, L), np.clip(cy - h / 2, 0, L),
+                            np.clip(cx + w / 2, 0, L), np.clip(cy + h / 2, 0, L)])
 
 
 def pair_users(g, pairing, rng=None):
