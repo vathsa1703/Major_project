@@ -34,7 +34,7 @@ def one(seed, h):
     X, Y = _grid(env)
     H = np.full(len(X), float(h))
     ux, uy = env.user_xy().T
-    G = md.channel_gain(ux, uy, X, Y, H, env.boxes)
+    G = md.channel_gain(ux, uy, X, Y, H, env.links)
     B, R, p = env.sc["bandwidth_hz"], env.min_rate, env.p_max_w
     row = dict(seed=seed, n_users=env.sc["n_users"])
     for scheme, eps in VARIANTS:

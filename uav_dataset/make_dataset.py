@@ -78,6 +78,9 @@ def make_scenario(seed):
     if sc["mobility"] == "sites":                    # competing sites (D-52); other scenarios are unchanged
         sc.update(make_sites(seed))
         sc["n_clusters"] = sc["n_sites"]
+    if sc["mobility"] == "place":                    # real-place case study (place.py); other scenarios are unchanged
+        import place
+        sc.update(place.make_place_scenario(seed))
     return sc
 
 
@@ -226,6 +229,9 @@ def make_users(seed, sc=None):
     sc = sc or make_scenario(seed)
     if sc.get("mobility") == "sites":
         return make_site_users(seed, sc)
+    if sc.get("mobility") == "place":
+        import place
+        return place.make_place_users(seed, sc)
     rng = np.random.default_rng([seed, 1])
     L = CFG["area_m"]
     n = sc["n_users"]
@@ -265,7 +271,8 @@ def make_users(seed, sc=None):
 
 
 def make_obstacles(seed, sc):
-    """Collapsed-building rectangles for one scenario. Returns a DataFrame (may be empty)."""
+    """Collapsed-building rectangles for one scenario. Returns a DataFrame (may be empty).
+    Place scenarios have no rectangles (their buildings are the height-aware model of scenario_links)."""
     rng = np.random.default_rng([seed, 4])
     L = CFG["area_m"]
     lo, hi = CFG["obstacles"]["size_range_m"]
@@ -276,6 +283,15 @@ def make_obstacles(seed, sc):
         "seed": seed, "obstacle_id": np.arange(n),
         "x_min": np.clip(cx - w / 2, 0, L), "y_min": np.clip(cy - h / 2, 0, L),
         "x_max": np.clip(cx + w / 2, 0, L), "y_max": np.clip(cy + h / 2, 0, L)})
+
+
+def scenario_links(seed, sc, users):
+    """The obstacle model channel_gain gets for a scenario: the rectangle array (every synthetic scenario, exactly as
+    before) or, for a place scenario, its height-aware place.PlaceLinks."""
+    if sc.get("mobility") == "place":
+        import place
+        return place.links_for(seed, users)
+    return obstacle_array(make_obstacles(seed, sc))
 
 
 def obstacle_array(obs):
@@ -308,6 +324,10 @@ def simulate_positions(seed, sc, u):
     Returns pos, vel of shape (T+1, n, 2). vel[t] is the velocity applied in the step that starts at t."""
     if sc["mobility"] == "sites":
         return simulate_sites(seed, sc, u)
+    if sc["mobility"] == "place":                         # people stay where they are; the event only switches them
+        pos = u[["x", "y"]].values.astype(float)
+        P = np.repeat(pos[None], CFG["mobility"]["episode_steps"] + 1, axis=0)
+        return P, np.zeros_like(P)
     mob = CFG["mobility"]
     rng = np.random.default_rng([seed, 3])
     L, dt, T = CFG["area_m"], mob["dt_s"], mob["episode_steps"]
@@ -415,8 +435,15 @@ def channel_gain(ux, uy, X, Y, H, boxes=None, rng=None, fading=None):
     boxes: (M,4) obstacle rectangles; a blocked link gets obstacles.excess_loss_db extra loss.
     rng + fading: if rng is given AND fading is on (default: config fading.enabled), each link is drawn
     LoS/NLoS and gets Rician (LoS) / Rayleigh (NLoS) fading
-    (unit mean power) instead of the average path loss."""
+    (unit mean power) instead of the average path loss.
+    boxes may instead be a place.PlaceLinks (real-place scenarios): then the user heights (ground or roof + handset)
+    enter the distance and elevation angle, and a ray test through the building height grid decides each link
+    (place.los_model): `geometric` = the ray test REPLACES Al-Hourani's P_LoS (clear -> eta_LoS, blocked -> eta_NLoS;
+    with fading on, the link is LoS/Rician exactly when the ray is clear); `statistical` = Al-Hourani's mean loss plus
+    obstacles.excess_loss_db on a blocked ray (the rectangle rule)."""
     a2g = CFG["a2g"]
+    if boxes is not None and hasattr(boxes, "los_clear"):
+        return _place_gain(ux, uy, X, Y, H, boxes, rng, fading)
     dx = ux[None, :] - X[:, None]
     dy = uy[None, :] - Y[:, None]
     d = np.sqrt(dx**2 + dy**2 + H[:, None]**2)
@@ -434,6 +461,37 @@ def channel_gain(ux, uy, X, Y, H, boxes=None, rng=None, fading=None):
         pl_db = fspl + p_los * a2g["eta_los_db"] + (1 - p_los) * a2g["eta_nlos_db"]
     if boxes is not None and len(boxes):
         pl_db = pl_db + CFG["obstacles"]["excess_loss_db"] * link_blocked(ux, uy, X, Y, boxes)
+    return 10 ** (-pl_db / 10) * fade
+
+
+def _place_gain(ux, uy, X, Y, H, links, rng=None, fading=None):
+    """channel_gain for a real-place scenario (see channel_gain)."""
+    a2g = CFG["a2g"]
+    uz = links.user_z(ux, uy)
+    dx = ux[None, :] - X[:, None]
+    dy = uy[None, :] - Y[:, None]
+    dz = np.maximum(H[:, None] - uz[None, :], 0.0)
+    d = np.maximum(np.sqrt(dx**2 + dy**2 + dz**2), 1.0)
+    fspl = 20 * np.log10(4 * np.pi * CFG["fc_hz"] * d / C)
+    clear = links.los_clear(ux, uy, X, Y, H)
+    fade_on = rng is not None and (CFG["fading"]["enabled"] if fading is None else fading)
+    if CFG["place"]["los_model"] == "geometric":
+        pl_db = fspl + np.where(clear, a2g["eta_los_db"], a2g["eta_nlos_db"])
+        los = clear
+    else:
+        theta = np.degrees(np.arcsin(dz / d))
+        p_los = 1.0 / (1.0 + a2g["a"] * np.exp(-a2g["b"] * (theta - a2g["a"])))
+        pl_db = fspl + p_los * a2g["eta_los_db"] + (1 - p_los) * a2g["eta_nlos_db"]
+        los = None
+        if fade_on:                      # LoS/NLoS drawn from Al-Hourani's P_LoS, as for the rectangles
+            los = rng.uniform(size=d.shape) < p_los
+            pl_db = fspl + np.where(los, a2g["eta_los_db"], a2g["eta_nlos_db"])
+        pl_db = pl_db + CFG["obstacles"]["excess_loss_db"] * ~clear
+    fade = 1.0
+    if fade_on:
+        K = 10 ** (CFG["fading"]["rician_k_db"] / 10)
+        cn = (rng.normal(size=d.shape) + 1j * rng.normal(size=d.shape)) / np.sqrt(2)
+        fade = np.where(los, np.abs(np.sqrt(K / (K + 1)) + cn / np.sqrt(K + 1)) ** 2, np.abs(cn) ** 2)
     return 10 ** (-pl_db / 10) * fade
 
 

@@ -191,6 +191,12 @@ FINGERPRINTS = {   # computed with the code BEFORE Stage 5 (commit ea840a5): the
 }
 
 
+def stored(*key):
+    """The stored fingerprint, compared to 1e-12 relative: numpy's exp/log kernels differ by CPU type (CI runners vary)
+    in the last bits; any real change to the game is many orders of magnitude larger."""
+    return pytest.approx(FINGERPRINTS[key], rel=1e-12, abs=1e-9)
+
+
 def fingerprint(env, act, seed):
     env.reset(seed=seed)
     rows, done = [], False
@@ -207,13 +213,13 @@ def test_dynamics_off_is_bit_exact(dynamics):
     acts = np.random.default_rng(11).uniform(-1, 1, (400, 4))
     for prof in ("default", "sites_d20_t0_ann"):
         md.apply_profile(prof)
-        assert fingerprint(UAVEnv(dynamics=dynamics), lambda e: acts[e.t], 3) == FINGERPRINTS[(prof, "random")]
+        assert fingerprint(UAVEnv(dynamics=dynamics), lambda e: acts[e.t], 3) == stored(prof, "random")
     md.apply_profile("default")
     p = make_policy("B6")
     env = UAVEnv(dynamics=dynamics)
     env.reset(seed=4)
     p.reset(env)
-    assert fingerprint(env, p.act, 4) == FINGERPRINTS[("default", "B6")]
+    assert fingerprint(env, p.act, 4) == stored("default", "B6")
 
 
 def test_quad_mode_logs_the_flight_and_leaves_the_env_rng_alone():

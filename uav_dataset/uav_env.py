@@ -153,12 +153,18 @@ class UAVEnv(gym.Env):
             ss = seed if seed is not None else int(self.np_random.integers(0, 2**31 - 1))
         self.scenario_seed = int(ss)
         self.sc = md.make_scenario(self.scenario_seed)
+        if self.sc["mobility"] == "place" and self.scenario_overrides:
+            raise ValueError("a real-place scenario takes its crowd and buildings from the map: no scenario_overrides")
         self.sc.update(self.scenario_overrides)
         if "n_users" in self.scenario_overrides:
             assert self.sc["n_users"] % 2 == 0, "n_users must be even (NOMA pairs)"
             self.sc["bandwidth_hz"] = self.sc["n_users"] * CFG["bandwidth_per_user_hz"]
         self.users = md.make_users(self.scenario_seed, self.sc)
-        self.boxes = md.obstacle_array(md.make_obstacles(self.scenario_seed, self.sc))
+        # links = what channel_gain gets: the rectangles (every synthetic scenario, as before) or the height-aware
+        # building model of a real-place scenario (place.PlaceLinks); boxes = the rectangles only (none for a place)
+        links = md.scenario_links(self.scenario_seed, self.sc, self.users)
+        self.place_links = None if isinstance(links, np.ndarray) else links
+        self.boxes = links if self.place_links is None else np.zeros((0, 4))
         self.P, self.V = md.simulate_positions(self.scenario_seed, self.sc, self.users)   # (T+1, n, 2)
         self.active = md.activity_mask(self.users, self.T, self.dt)    # (T+1, n) bool, or None = everyone counts
         self.min_rate = self.users["min_rate_bps"].values
@@ -179,6 +185,12 @@ class UAVEnv(gym.Env):
                                                              self.uav["h_max_m"]), cfg=self.quad_cfg)
             self.flight = [self.quad.reset(self.x, self.y, self.h)]
         return self._obs(), self._info(None)
+
+    @property
+    def links(self):
+        """What channel_gain gets as obstacles: the rectangles env.boxes (every synthetic scenario; read at call time,
+        so code that edits env.boxes still takes effect), or the height-aware place.PlaceLinks of a real place."""
+        return self.boxes if self.place_links is None else self.place_links
 
     def observation(self, groups=None, dict_obs=None, history_every=None, privileged=None):
         """The current observation. `groups` picks a subset of observation groups (a trained agent asks for the
@@ -235,7 +247,7 @@ class UAVEnv(gym.Env):
         to score a FORECAST user set (baselines.B6Forecast)."""
         ux, uy = np.asarray(xy, dtype=float).T
         X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
-        gains = md.channel_gain(ux, uy, X, Y, H, self.boxes)
+        gains = md.channel_gain(ux, uy, X, Y, H, self.links)
         rng = np.random.default_rng([self.scenario_seed, t])
         if self.access in md.QOS_SCHEMES:                 # vectorised over all candidates at once
             return self.access_rates(gains, p_w, return_info=True, min_rate=min_rate,
@@ -311,7 +323,7 @@ class UAVEnv(gym.Env):
 
         xy, min_rate, rescue = self.users_now()           # only the users that count now (all, without a mask)
         ux, uy = xy.T
-        g = md.channel_gain(ux, uy, np.array([self.x]), np.array([self.y]), np.array([self.h]), self.boxes,
+        g = md.channel_gain(ux, uy, np.array([self.x]), np.array([self.y]), np.array([self.h]), self.links,
                             self.rng, self.fading)[0]
         rate_noma, rate_oma = md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"],
                                             self.rng)
