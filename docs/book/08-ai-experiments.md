@@ -288,3 +288,108 @@ search pilot. The room is mostly about **one decision: when to leave for the oth
 more seeds) was dropped as uninformative; the owner approved a **hybrid timing AI** instead (D-56: the search pilot chooses
 where; the AI chooses only when to leave), plus the "anticipation rule" and "value of location information" studies.
 Reproduce: Kaggle kernels `uav-g5-round1-t0/t60`, then `python g5_eval.py --profile sites_d20_t0_ann --models <folder> --out <dir>`.
+
+## 8.10 The hybrid timing AI: the search pilot chooses where, the AI only when to leave (2026-10-24)
+**Plain words.** 8.9 showed the full AI cannot learn *everything* at once, and 7.13 showed the room is mostly in one decision:
+**when to leave site A for site B**. So we gave the AI only that decision. It is like a co-driver who never touches the
+wheel and only says "leave now" or "not yet"; the search pilot B6 does all the steering (where, at what height). **It is a
+hybrid, and every report must say so.**
+
+**Scientific statement.** Every 10 s (B6's own rhythm, 30 decisions per episode) a PPO policy picks Discrete(2): FOLLOW (fly
+to B6's choice now) or LEAVE (fly to the B-target, the lattice node with the best forecast coverage for the announced
+post-event demand, fixed at t = 0 from the announcement). Observation = the raw G5 inputs (maps, crowd size, own state,
+history, the announcement); it never sees B6's choice or the B-target. Reward = coverage. An agent that always follows flies
+exactly B6 (tested). Training: fixed pool of 200 fresh scenarios (10000-10199), 100,000 decisions per run, 3 training seeds per
+cell, Kaggle; the FINAL model is evaluated (no model selection). 2 cells: `sites_d20_t0_ann`, `sites_d20_t60_ann`.
+
+**Pre-registered rule** (`docs/prereg/hybrid_timing.md`, before any training): in at least one cell the 3-seed mean beats the
+bar (per scenario the best of B6, B7, B8, B6fc) on val 100-119: mean paired difference > 0 AND Holm-adjusted p < 0.05 over the
+2 cells. Seeds 3 and 4 only if Round A passes.
+
+**Result: NOT MET** (`uav_dataset/results/hybrid/summary.md`):
+
+| Cell | Bar | Hybrid (3-seed mean) | Hybrid - bar | p (Holm) | Hybrid - B6 | Clairvoyant room over the bar | Hindsight best single departure - bar |
+|---|---|---|---|---|---|---|---|
+| 2 km, sudden (`t0`) | 0.756 | **0.752** | -0.004 ± 0.013 (a tie) | 0.573 (0.573) | **+0.041 ± 0.013*** | +0.048 ± 0.010* | +0.013 ± 0.010* |
+| 2 km, over 1 min (`t60`) | 0.753 | **0.734** | -0.019 ± 0.011* (a loss) | 0.0007 (0.0014) | **+0.014 ± 0.007*** | +0.044 ± 0.009* | +0.008 ± 0.007* |
+
+Per training seed: t0 0.753 / 0.753 / 0.752; t60 0.738 / 0.726 / 0.739 (every seed below the bar in t60). The AI learned to
+leave (leave share 0.71-0.77 in t0; first leave around decision 7) and clearly beats plain B6 in both cells, but it captures
+none of the room over the bar (share captured -8% in t0, -44% in t60). Round B (2 more seeds) was not run, as pre-registered.
+
+**Why so little can be won here.** The hindsight diagnostic (the best fixed departure per scenario, chosen with the
+outcome; not flyable) is only +0.013 / +0.008 above the bar: with these two actions, even *perfect* timing barely beats the
+forecasting pilot. The rest of the clairvoyant room (+0.048 / +0.044) needs more than a leave-time choice. Note also that the
+bar here did not include B6dep (it was not yet in the pilot list at evaluation time, as the pre-registration allowed); on the
+same 20 val scenarios B6dep scores 0.780 / 0.774 (7.15), so against today's best simple pilot the hybrid is further behind
+(difference of means, not a paired test).
+
+**NOMA vs OMA (same agents, `oma_opt`):** t0 0.752 vs 0.620, **NOMA - OMA +0.132 ± 0.034***; t60 0.734 vs 0.606,
+**+0.128 ± 0.031***.
+
+**Not verified.** 3 training seeds only (Round B not triggered); one training budget; the B-target is one fixed spot per
+episode; the hindsight ceiling is a diagnostic, not a pilot. The agents were trained with NOMA, so their OMA runs are outside
+what they learned.
+
+**Reproduce:** `python hybrid_tables.py build` / `bundle` (B6 tables of the training pool), `python hybrid_train.py --profile
+<cell> --bundle <file>` (Kaggle, one kernel per cell), `python hybrid_eval.py --profile <cell> --models <folder> --out
+<dir> [--bar_from <G5 round-1 episodes.csv>]`, then `--report` (OMA tables are built per scenario and cached; per-episode
+rows in `uav_dataset/results/hybrid/t0|t60/episodes.csv`).
+
+## 8.11 The AI under "wrong physics" (model mismatch, 2026-10-24)
+**Plain words.** The search pilots plan with the textbook radio model. If the real radio differs (hidden collapsed buildings,
+signal shadowing, thicker walls), they plan with a wrong map, like a taxi driver using last year's street map. An AI that
+learns only from what it measures might not be fooled. We asked: when the textbook is wrong, can the AI beat the pilots that
+trust it?
+
+**Scientific statement.** A new `mismatch:` config section makes the TRUE world (what `env.step` serves) differ from the
+NOMINAL model the pilots plan with: (a) user-side correlated log-normal shadowing (sigma 4 or 8 dB at grazing angles,
+correlation 25 / 50 / 150 m), (b) a true building loss of 25 dB (planner 15 dB), (d) hidden buildings that are not on the
+planner's map. All off by default (old results bit-exact; tests). New pilots: **B6r** (B6 + off-grid pattern search, to
+separate "finer placement" from "knowing the channel"), **B6true** (B6r on the TRUE channel: an upper bound, not a
+competitor), **B6meas** (learning-free, the AI's information level: the nominal model plus the coverage it *measures* each
+second where it flies; surveys the top 3 nominal spots, then a measured pattern search; tuned on design seeds 10000-10009
+only). Room = B6true minus the best of B6 and B6meas; a cell has room if >= 0.02 with the CI above 0. Scenarios: still crowds
+on a 2 km map with the G5 settings (`mm_*` profiles). AI: E0's design with `gotoz` steering (where + altitude), 150,000
+decisions, 3 training seeds per cell, Kaggle.
+
+**Pre-registered rule** (`docs/prereg/model_mismatch.md`, final 2026-10-23 before any training): the AI's 3-seed mean beats
+the level-1 bar (per scenario the best of B6, B6meas, B3) on val 100-119, paired, Holm over the training cells, in at least
+one cell. Negative control `mm_none` (textbook right): the AI must NOT beat B6.
+
+**Room test (no AI), the pre-registered grid: NULL** (`uav_dataset/results/mismatch/room.md`). None of the 9 pre-registered
+cells reached 0.02: largest 4 hidden buildings +0.017 [+0.009, +0.026] and shadowing 8 dB / 150 m +0.016 [+0.010, +0.023].
+Two **larger-dose cells were added afterwards and are EXPLORATORY**: `mm_h8` (8 hidden buildings) +0.036 [+0.023, +0.050]
+and `mm_combo` (shadowing 8 dB / 150 m + loss 25 dB + 4 hidden) +0.035 [+0.020, +0.050] on val, confirmed on fresh seeds
+1000-1019 (+0.026 [+0.012, +0.041]; +0.033 [+0.020, +0.046]) before any training.
+
+**AI result: NOT MET in any cell** (`docs/prereg/model_mismatch_results.md`; draw 0, val 100-119, 20 scenarios):
+
+| Cell | Bar (best of B6, B6meas, B3) | AI (3-seed mean) | AI - bar [95% CI] | Holm p | AI - B6 | B6true (upper bound) | NOMA - OMA (AI) |
+|---|---|---|---|---|---|---|---|
+| `mm_h8` (exploratory) | 0.795 | 0.756 | **-0.039** [-0.061, -0.016] | 0.0008 | **+0.004** [-0.036, +0.043] | 0.829 | +0.111 [+0.078, +0.143] |
+| `mm_combo` (exploratory) | 0.801 | 0.700 | **-0.101** [-0.138, -0.064] | <0.0001 | -0.066 [-0.101, -0.030] | 0.832 | +0.078 [+0.053, +0.103] |
+| `mm_none` (negative control) | 0.865 | 0.817 | -0.048 [-0.066, -0.031] | <0.0001 | -0.048 [-0.066, -0.030] | 0.869 | +0.076 [+0.051, +0.100] |
+
+Pilots on draw 0: `mm_h8` B3 0.672, B6 0.752, B6meas 0.786, B6true 0.829; `mm_none` B3 0.800, B6 0.865, B6meas 0.857,
+B6true 0.869. Every training seed loses to the bar (`mm_h8` -0.051 / -0.035 / -0.029; `mm_combo` -0.102 / -0.083 / -0.118).
+
+**Checks.** The negative control behaves as required (the AI does not beat B6 when the textbook is right: -0.048). The
+memorisation check (draw 1: a fresh draw of the hidden errors on the same scenarios) gives the same picture (`mm_h8` -0.046
+[-0.063, -0.028]; `mm_combo` -0.090 [-0.128, -0.051]).
+
+**What it means.** The AI is not fooled by the wrong textbook (with 8 hidden buildings plain B6 drops from 0.865 to 0.752,
+and the AI ties it, +0.004), but it is still beaten by a pilot that **measures and searches**. The useful finding is a model-based fix,
+not an AI result: measuring a few spots and then searching recovers most of the loss (`mm_h8`: B6 0.752 -> B6meas 0.786,
+ceiling 0.829). It matches the expectation written down before training (the room, 0.026-0.036, is smaller than the known
+learning gap of about 0.08).
+
+**Not verified.** Every mismatch parameter is an engineering assumption (no primary source read; 3GPP TR 36.777 Annex B,
+TR 38.901 and Al-Hourani Globecom 2014 are listed to read); the elevation-dependent shadowing std is a linear assumption;
+"another environment class of Al-Hourani" was not built because no second parameter row is verified; `hard` robustness was
+not run (no cell passed); the mismatch is not defined for real-place scenarios (the code refuses the combination).
+
+**Reproduce:** `python mismatch_exp.py room`, `tune`, `confirm`, `report` (room test, B6meas tuning, fresh-seed
+confirmation); Kaggle kernels
+`uav-mismatch-mm-{none,h8,combo}`; `python mismatch_eval.py run --cell <cell> --models <folder> --out results/mismatch/ai
+[--draw 1]`, then `python mismatch_eval.py combine mm_h8 mm_combo mm_none --out results/mismatch/ai`.
