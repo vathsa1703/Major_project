@@ -424,3 +424,200 @@ round confirmed there is no leak and that this is a flaw of its scoring rule; a 
 best moment, then fly) narrowed the 1.5 km designs below 0.02 on 4 scenarios, leaving **the 2 km designs as the clear place
 where an AI could win** (+0.04 to +0.09). Run time: about 85 s per scenario; three processes in parallel; results identical
 to a single-process run (checked on 3 rows). Reproduce: `python sites_exp.py confirm --shard k/3`, `merge`, `report`.
+
+## 7.14 How much does the planner need to know about where people are? (value of location information, 2026-10-23)
+**Plain words.** Until now every search pilot (B3, B6) knew exactly where every person stands. A real drone would not. After
+a disaster the drone *is* the network: a phone that connects to it can send its GPS position, but only some phones do, GPS is
+off by some metres, and reports arrive only every so often. Think of a lifeguard who cannot see the beach and only gets text
+messages: how many swimmers must text, how accurate must the texts be, and how often, before the lifeguard stands in the
+right place? We asked: what share **f** of phones must report, with what GPS error **sigma** and what report interval
+(**age**), for B6 to keep at least **98%** of the coverage it gets with full information?
+
+**Scientific statement.** `baselines.ReportsView` builds the planner's belief from phone reports: a fixed random share f of
+users report (nested: the reporters at f = 0.1 are a subset of those at f = 0.2), each report carries a fresh 2-D Gaussian
+error of std sigma per axis, each phone reports every `age` seconds at its own phase and once on attach; unreported users are
+invisible; k reporters stand for round(k / f) users (f assumed known; the extra pseudo-users get classes from the class mix).
+B6rep / B3rep run B6's / B3's search on this belief; the drone still serves the TRUE users with the scenario's radio scheme.
+With f = 1, sigma = 0, age = 0 the belief equals the true users and B6rep equals B6 action for action (tested). 1,440 episodes:
+2 profiles (`hard`; `sites_d20_t60_ann` with the G5 settings) x 24 pilot configurations x 30 scenarios (val 100-119 and
+fresh 1000-1009); every episode survived the 300 s.
+
+**Pre-registered rule** (`docs/prereg/value_of_info.md`, committed before any main run). f* = the smallest f whose coverage
+ratio (and that of every larger f) is >= 0.98; 95% interval by paired bootstrap over scenarios (10,000 resamples). PASS if,
+for B6 on BOTH profiles and for BOTH sigma = 10 m and 50 m, the upper end of f*'s 95% interval is below 1.
+
+**Result: PASSED** (`docs/prereg/value_of_info_results.md`, Table 2; `value_of_info_table_fstar.csv`):
+
+| Profile | Planner | GPS error | f* | 95% interval | Full-information coverage |
+|---|---|---|---|---|---|
+| `hard` (moving crowds) | B6 | 10 m | **0.5** | [0.1, 0.5] | 0.770 |
+| `hard` | B6 | 50 m | **0.5** | [0.1, 0.5] | 0.770 |
+| `sites_d20_t60_ann` (competing sites) | B6 | 10 m | **0.05** | [0.05, 0.2] | 0.717 |
+| `sites_d20_t60_ann` | B6 | 50 m | **0.05** | [0.05, 0.2] | 0.717 |
+| `hard` | B3 (secondary) | 10 m | 0.1 | [0.05, 0.5] | 0.705 |
+| `sites_d20_t60_ann` | B3 (secondary) | 10 m | 0.2 | [0.05, 0.5] | 0.692 |
+
+What each knob does (B6, ratio to its own full-information coverage, Table 1 of the results file):
+- **Share of phones reporting** matters on moving crowds: `hard` 5% -> 0.957, 10% -> 0.973, 20% -> 0.978, 50% -> 0.990
+  (sigma 10 m). On the competing-sites cell every crowd is a dense site, so even 5% of phones (about 20 reports) give 0.983.
+- **GPS error makes no measurable difference** between 10 and 50 m: at f = 0.2, `hard` 0.978 (10 m) vs 0.979 (50 m); sites
+  1.004 vs 1.003. The search grid is 154 m wide, so the planner needs to know roughly where the crowds are and how big they
+  are, not where each person stands.
+- **Report age matters where people move away**: on the sites cell at f = 0.2, B6 drops from 1.004 (age 0) to 0.984 (30 s)
+  and 0.978 (60 s), B3 from 0.987 to 0.973 and 0.963; on `hard` the age effect is small (0.978 -> 0.976 -> 0.975).
+- Ratios slightly above 1 occur (sites, f = 1, sigma 10: 1.007 [1.002, 1.011]): B6 is a greedy 10 s planner, so a slightly
+  perturbed picture can by chance lead it to a better spot. This is not "better information".
+
+**Design rule for a rescue team (within this simulator):** get position reports from about half of the attached phones,
+refreshed at least every 30 s; GPS good to about 50 m is enough. With 1 phone in 5 reporting expect about 2% less coverage
+on moving crowds; with 1 in 20 about 4% less.
+
+![Coverage ratio vs share of phones reporting](figures/voi_ratio_vs_f.png)
+![GPS error and report age at f = 0.2](figures/voi_sigma_age.png)
+
+**Not verified.** GPS errors are independent per report (real errors are correlated in time); who reports is random
+(in reality older phones, dead batteries and people indoors report less); f is assumed known; the drone ignores the signal
+strength of phones that do not report (using it could only help, so this is a lower bound on what a planner can know).
+The GPS error scales are engineering assumptions, no source checked. Table 3 (by crowd size) is exploratory (2-10 scenarios
+per row). The `hard` runs were split between the laptop and Kaggle; 124 episodes run on both were bit-identical.
+
+**Reproduce:** `python voi_exp.py run --profiles hard,sites_d20_t60_ann [--part i/n]`, then `python voi_exp.py analyse`
+(outputs in `uav_dataset/results/voi/`; tables copied verbatim into `docs/prereg/value_of_info_results.md`, ratios in
+`value_of_info_table_ratios.csv`).
+
+## 7.15 When can thinking ahead win? The anticipation rule and the departure-time pilot (2026-10-23)
+**Plain words.** 7.12-7.13 showed that a pilot that knows the future beats greedy re-planning only in some designs (sites
+far apart). We tried to turn that into a **rule of thumb**: two numbers per design that predict how much room there is, fitted
+on the 9 designs we had and then tested on **8 new designs nobody had run**, with the predictions written down first. Like a
+weather forecaster who must publish tomorrow's forecast before looking out of the window. On the way we built a stronger
+simple pilot, **B6dep**, that decides *when* to leave for the announced new site.
+
+**B6dep (departure-time pilot, `baselines.B6Depart`).** B6, plus: every 10 s while an announced move is not over, it scores
+whole two-leg plans "stay at B6's choice until departure d, then fly to one of the 3 best spots for the end of the move"
+(d = now, now + 10 s, ... up to the end of the move) and "never leave", all on one common horizon (now to the end of the
+episode, every 5 s, with the game's own flight kinematics and braking) using B6fc's forecast; it flies the best plan's first
+leg. Same information as B6fc (the announcement, present positions and velocities; never the future). Without an
+announcement it is exactly B6 (test). 9 tests in `test_b6dep.py`.
+
+**Scientific statement.** Per design: footprint radius rho (where coverage of site A halves as the drone moves away; 646-703 m),
+dead transit T_tr = max(0, D - 2 rho) / v_max, A = (T_tr + 10 s) / (tau + 10 s) (transit vs ramp), M = T_tr / T (share of the
+mission spent in transit). Headroom h = clairvoyant plan minus the best simple pilot, paired. Three monotone models were fitted
+on the 9 old designs (fresh seeds 1000-1019); the lowest leave-one-out error picked **power: h = 0.0954 x M^0.48 x
+(A / (1 + A))^0.20** (fit R^2 0.986). Disclosure (written in the pre-registration): a first candidate set gave a log-linear
+model that extrapolated wildly for one new cell; seeing that on the new cells' A and M only (no new-cell run), the power model
+was added and log-linear made non-selectable.
+
+**Pre-registered rule** (`docs/prereg/anticipation_rule.md`, committed before any new-cell run): on the 8 new designs
+(seeds 2000-2011, 12 each), (1) R^2 of predicted vs measured h >= 0.7 AND (2) the room / no-room call (h >= 0.02) right in at
+least 7 of 8.
+
+**Result: NOT CONFIRMED** (`docs/prereg/anticipation/results_summary.md`): R^2 = **0.576** (< 0.7), calls right **5 of 8**
+(< 7). (Pearson r = 0.856, for information.)
+
+| New design | What changed | Predicted h | Measured h (95% CI) | Call right? |
+|---|---|---|---|---|
+| `sites_v8_d15_t60` | drone 8 m/s | 0.0173 | +0.0308 ± 0.0175 | no |
+| `sites_v25_d15_t60` | drone 25 m/s | 0.0092 | +0.0072 ± 0.0049 | yes |
+| `sites_v8_d20_t0` | drone 8 m/s | 0.0489 | +0.0397 ± 0.0193 | yes |
+| `sites_v25_d20_t0` | drone 25 m/s | 0.0275 | +0.0190 ± 0.0083 | no |
+| `sites_T600_d20_t0` | 600 s mission | 0.0256 | +0.0184 ± 0.0057 | no |
+| `sites_T600_d15_t60` | 600 s mission | 0.0087 | +0.0096 ± 0.0046 | yes |
+| `sites_d175_t30` | 1.75 km, 30 s ramp | 0.0237 | +0.0256 ± 0.0127 | yes |
+| `sites_d125_t120` | 1.25 km, 120 s ramp | 0.0000 | +0.0054 ± 0.0043 | yes |
+
+**What the misses point to.** The three wrong calls are a slow-drone cell (more room than predicted) and a fast-drone and a
+600 s cell (less room than predicted): the drone's speed and the mission length act differently from how they enter through
+T_tr and M in the fitted formula. The direction is not uniform (the other 8 m/s cell was over-predicted, 0.0489 vs 0.0397),
+so the rule needs a better variable, not just a re-fit. A post-hoc check (labelled as such in the results file) with other
+transit definitions gets 8/8 calls but a negative R^2: no transit definition we tried meets both criteria.
+
+**B6dep is the best simple pilot.** It is the bar pilot in all 17 designs (9 old, 8 new); on the new designs B6dep scores
+0.712-0.862 against 0.701-0.848 for the announced forecaster B6fc. With B6dep in the bar the announced room no longer passes
+0.02 at 1.5 km; only the 2 km designs keep room (+0.026 to +0.036).
+
+**Where does the gap between the clairvoyant pilot and the full AI of G5 round 1 go?** (not pre-registered; G5 cells, val
+100-119; the five parts add up to the total):
+
+| Part of the gap | `sites_d20_t0_ann` | `sites_d20_t60_ann` |
+|---|---|---|
+| foresight (clairvoyant - B6dep) | +0.024 ± 0.008 | +0.023 ± 0.008 |
+| using the announcement (B6dep - B6) | +0.069 ± 0.016 | +0.054 ± 0.013 |
+| altitude choice (B6 - B3) | +0.019 ± 0.012 | +0.025 ± 0.010 |
+| information (B3 - B3obsUN, the AI's maps) | +0.028 ± 0.018 | +0.028 ± 0.016 |
+| learning (B3obsUN - best AI) | -0.016 ± 0.022 | -0.012 ± 0.019 |
+| **total (clairvoyant - best AI)** | **+0.125 ± 0.019** | **+0.118 ± 0.015** |
+
+Reading: the AI's shortfall is **not** a learning failure (it matches a search pilot that has only its information; the
+learning part is about zero and not significant). It is the information in its maps, the altitude it may not choose, and
+above all **using the announcement well** (when to leave), which a simple departure-time rule already does.
+
+![The anticipation rule: predicted vs measured headroom](figures/anticipation_rule.png)
+
+**Not verified.** 12 seeds per new cell (owner's reduction, before any run); rho from 20 design seeds; batteries in the new
+cells were raised so that every pilot lasts (h is energy-free by design); the decomposition is exploratory; the clairvoyant
+pilot ignores energy in its planning.
+
+**Reproduce:** `python anticip_exp.py footprint`, `oldcells --cells ... --shard k/4`, `merge old`,
+`fit --confirm <phase-4 file>`, `newcells --cells ... --shard k/4`, `merge new`, `evaluate`; tables with
+`python anticip_report.py` (raw rows in `docs/prereg/anticipation/*.csv`).
+
+## 7.16 A real place: a scenario based on the September 2024 Kathmandu (Bagmati) floods (2026-10-24)
+**Plain words.** All earlier scenarios are invented maps with rectangles for collapsed buildings. Here we took a real
+2 x 2 km piece of Kathmandu along the Bagmati river (Teku, Kuleshwor, Balkhu, Thapathali), downloaded every building
+footprint from OpenStreetMap (12,061 buildings), gave each a height, and flew the same pilots over a flood crowd placed
+on that map. The new physics is a **3-D line of sight**: a straight line from each phone to the drone, checked against the
+roofs. Someone on a roof sees the drone over the neighbours; someone in a narrow lane between four-storey houses usually
+does not. This is **a scenario based on** the floods: the buildings are real, the people are **reconstructed** from the map
+with engineering assumptions. It is not real data and not a digital twin. Map data (c) OpenStreetMap contributors (ODbL).
+
+**Scientific statement.** Footprints rasterised at 2 m (28.8% of cells built); heights from `height` or `building:levels` x 3 m,
+else drawn from the 6% of tagged buildings (94% are untagged). The ray test replaces Al-Hourani's P_LoS
+(`place.los_model: geometric`): clear ray -> FSPL + eta_LoS (1 dB), blocked -> FSPL + eta_NLoS (20 dB). Flood = a 200 m band
+around the river centreline (no flood map used); 300 / 600 / 1000 people: 30-50% stranded on roofs in the band, 20-40% at
+shelters (schools, temples, hospitals), the rest on dry ground; an unannounced evacuation moves part of the stranded to a
+shelter. Profile `place_kathmandu_bagmati` with the G5 settings; pilots B0, B2, B3, B6, B7, B8, B6fc on seeds 0-19 under
+adaptive NOMA and equally optimised OMA, compared with the synthetic `hard` profile under the same settings (`hard_g5`).
+No AI was trained.
+
+**Result** (`docs/case_nepal/results.md`; coverage, mean over 20 scenarios; * = paired 95% CI excludes 0):
+
+| Pilot | Kathmandu NOMA | Kathmandu OMA | NOMA - OMA | `hard_g5` NOMA | `hard_g5` OMA | NOMA - OMA |
+|---|---|---|---|---|---|---|
+| B0 (parked) | 0.674 | 0.479 | +0.195* | 0.560 | 0.369 | +0.191* |
+| B2 | 0.713 | 0.521 | +0.191* | 0.726 | 0.568 | +0.159* |
+| B3 | 0.741 | 0.577 | +0.164* | 0.769 | 0.633 | +0.135* |
+| **B6** | **0.781** | **0.654** | **+0.127*** | 0.837 | 0.773 | +0.064* |
+| B7 (circles) | 0.774 | 0.626 | +0.148* | 0.833 | 0.761 | +0.072* |
+| B8 / B6fc | 0.781 / 0.781 | 0.654 / 0.654 | +0.127* | 0.837 / 0.836 | 0.773 / 0.777 | +0.064* / +0.059* |
+
+- **The ranking does not change** on the real map: B6 = B8 = B6fc > B7 > B3 > B2 > B0, with NOMA and with OMA.
+- **NOMA's gain is about twice the synthetic one** for the searching pilots: B6 +0.127 vs +0.064 (difference +0.063 ± 0.022,
+  significant), B7 +0.148 vs +0.072. For B0, B2 and B3 the gains are similar (difference not significant). Our reading (a
+  hypothesis, not tested separately): the 3-D line of sight splits people into two groups about 19 dB apart (clear vs
+  blocked rays), and NOMA gains most when paired users have very different channels.
+- **Who is served (B6, NOMA):** rescue users 0.892 (0.888 with OMA; rescue first), stranded people on roofs 0.834, at shelters
+  0.771, dry ground 0.720, scattered 0.683. With OMA the ground-level groups drop much more (shelters 0.601, dry ground 0.545):
+  the NOMA gain lands mostly on people at ground level.
+- **Moving matters less here** (B6 - B0 = +0.107 vs +0.278 on `hard_g5`): the river runs near the map centre and people stand
+  still. **Forecasting adds nothing** (B6fc = B6 in 40 of 40 episodes: the evacuation is unannounced).
+- **Sensitivity:** with the rectangle rule instead of the ray test (`los_model: statistical`, which counts the buildings twice)
+  B6 falls to 0.636 but NOMA still gains +0.141; the flood-band width (150 / 300 m) moves B6 by less than 0.02.
+
+**Flag: altitude.** B6 flies at about **290 m** (the top of the simulator's 50-300 m range; mean altitude over the episode
+on the Kathmandu map 286 m with NOMA and 290 m with OMA, on `hard_g5` 286 / 278 m; `docs/case_nepal/episodes.csv`, column
+`mean_h`), because from high up the rays clear the roofs. Civil drone rules in many countries cap small drones at about 120 m above ground (we did not
+check Nepal's rule from a primary source). A drone held at 120 m would see more blocked rays, so these coverage numbers are
+optimistic for a legal flight; a 120 m cap is an easy sensitivity run that has not been done.
+
+![Kathmandu map: buildings by height, the river, the assumed flood band, shelters and people. (c) OpenStreetMap contributors](figures/nepal_map.png)
+![Flight paths of the pilots on the Kathmandu map. (c) OpenStreetMap contributors](figures/nepal_paths.png)
+![NOMA vs OMA per pilot, Kathmandu vs synthetic hard](figures/nepal_bars.png)
+
+**Not verified.** The crowd and the flood band are assumptions (survivor positions are not published; the 2024 flood extent
+was not used); 94% of building heights are drawn; no diffraction, trees, terrain or indoor users; the geometric LoS model has
+not been checked against a measurement in Kathmandu; only 20 crowd draws, and the place vs `hard_g5` NOMA comparison is
+unpaired (Welch-style CI); people stand still apart from the evacuation; Teku and Kuleshwor were not verified as flooded in
+2024 from a primary source (news reports cover Balkhu and Thapathali). Full assumptions table: `docs/case_nepal/README.md`.
+
+**Reproduce:** `python nepal_case.py run --shard 0/2` (and `1/2`), `sens`, `report`, `figures`, `timing` (the processed map
+`uav_dataset/places/kathmandu_bagmati.json` is committed, so no internet is needed).

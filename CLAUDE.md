@@ -105,6 +105,19 @@ Change settings only in `config.yaml` (one config per dataset version). Splits b
   all 8 full-AI agents below the bar (best 0.680 vs 0.756/0.753) and below B6. Stage 5 quadcopter + 3D page built (4.9):
   coverage gap -0.003..-0.012, wind <= 0.002. D-56: contributions = anticipation rule + value of location info; hybrid
   timing AI; round 2 dropped. Kaggle CLI set up (owner's key in the user folder; never read it).
+  FINAL STUDIES (all pre-registered; integrated in final/integrate-2): VALUE OF LOCATION INFO PASSED (book 7.14; B6rep/B3rep,
+  voi_exp.py): f* 0.5 on `hard`, 0.05 on sites_d20_t60_ann, GPS 10 vs 50 m no difference, reports must be < ~30 s old.
+  ANTICIPATION RULE NOT CONFIRMED (7.15; anticip_exp.py): R^2 0.576 < 0.7, 5/8 calls < 7/8 (speed, mission length off);
+  B6dep departure-time pilot = best simple pilot in all 17 cells; gap = announcement use 0.05-0.07, information 0.03,
+  altitude 0.02, foresight 0.02, learning ~0. HYBRID TIMING AI NOT MET (8.10; hybrid*.py): t0 0.752 vs bar 0.756 (tie),
+  t60 0.734 vs 0.753 (loss), beats B6 +0.041/+0.014; hindsight timing ceiling only +0.013/+0.008. WRONG PHYSICS NOT MET
+  (8.11; `mismatch:` off by default, B6r/B6true/B6meas, mismatch_*.py): pre-registered grid null; exploratory mm_h8 -0.039,
+  mm_combo -0.101 vs bar; AI ties B6 in mm_h8; B6meas (measure + search) is the fix. NOMA - OMA +0.08..0.13 everywhere
+  (13.11). KATHMANDU CASE (7.16, PR #22; place.py, osm_place.py, nepal_case.py; "a scenario based on", (c) OSM
+  contributors): ranking unchanged, B6 0.781 NOMA vs 0.654 OMA, NOMA gain ~2x synthetic; B6 flies ~290 m (above the ~120 m
+  legal limit: flag, 120 m run not done). Mismatch + real place raises NotImplementedError (never combined).
+  D-57 (10-26): owner GO for "find and serve" (locate phones from uplink signal strength, then serve with NOMA; simulation
+  only; branch search/find-serve, pre-registered before results).
 - Go phase by phase. Propose schema changes or new dependencies before making them, then wait for confirmation.
 - After each step, summarize in plain words: what was built, what was tested, what is left. Say clearly what was not verified.
 - Flag blockers instead of working around them. The rest of the team, not only the author, must be able to explain any code. The user is new to RL/NOMA terms, so explain simply first, then in scientific terms.

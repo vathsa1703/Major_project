@@ -213,3 +213,24 @@ users at full power. That is why the next step is adaptive power allocation per 
 Since Track 1: "When both schemes allocate power optimally to serve as many users as possible, NOMA still serves 3-5
 more users per 100 than OMA, with more throughput and fewer unserved rescue users; imperfect SIC halves but does not
 remove that gain. The price of the coverage objective, for both schemes, is lower total throughput."
+
+## 13.11 NOMA vs OMA in the final studies (2026-10-24)
+**Plain words.** Every study since G5 ran the same pilot or AI twice: once with adaptive NOMA and once with equally optimised
+OMA (same bandwidth, same power, both with the G5 settings: SIC residual 0.05, rescue users first). NOMA wins everywhere, and
+by more than on the synthetic maps of 13.9.
+
+| Study (book section) | Who flies | NOMA | OMA | NOMA - OMA (paired, 95% CI) | Source |
+|---|---|---|---|---|---|
+| Hybrid timing AI, 2 km sudden (8.10) | hybrid AI, 3 seeds | 0.752 | 0.620 | +0.132 ± 0.034* | `uav_dataset/results/hybrid/summary.md` |
+| Hybrid timing AI, 2 km over 1 min (8.10) | hybrid AI, 3 seeds | 0.734 | 0.606 | +0.128 ± 0.031* | same |
+| Wrong physics, 8 hidden buildings (8.11) | AI, 3 seeds | 0.756 | - | +0.111 [+0.078, +0.143] | `docs/prereg/model_mismatch_results.md` |
+| Wrong physics, all errors (8.11) | AI, 3 seeds | 0.700 | - | +0.078 [+0.053, +0.103] | same |
+| Wrong physics, textbook right (8.11) | AI, 3 seeds | 0.817 | - | +0.076 [+0.051, +0.100] | same |
+| Kathmandu case (7.16) | B6 | 0.781 | 0.654 | +0.127 ± 0.008* | `docs/case_nepal/results.md` |
+| Kathmandu case (7.16) | B7 | 0.774 | 0.626 | +0.148 ± 0.007* | same |
+| Synthetic `hard_g5`, same seeds (7.16) | B6 | 0.837 | 0.773 | +0.064 ± 0.021* | same |
+
+("-": the results file gives the difference, not the OMA mean.) Two caveats: the AIs were trained with NOMA, so their OMA runs
+are outside what they learned (the gain may be overstated for the AI rows); on the real map the larger gain for the searching
+pilots (+0.127 vs +0.064 for B6) is explained by a hypothesis (the 3-D line of sight splits users into two groups about 19 dB
+apart, and NOMA pairs gain most from unequal channels) that was not tested separately.

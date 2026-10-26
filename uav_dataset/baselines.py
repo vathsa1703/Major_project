@@ -1,7 +1,8 @@
 """Baseline controllers B0-B5, plus B6 (B3 with altitude search), B7 (B6's targets, but circling at the
 minimum-power speed instead of hovering; plan step 5) and B8 (B6's targets; hovers while the battery would last
 hovering to the end, circles like B7 otherwise; D-52) and B6fc (B6 scoring its candidates on a forecast of the active
-users at the drone's arrival: velocity extrapolation, plus the announced event when there is one; D-52 phase 3).
+users at the drone's arrival: velocity extrapolation, plus the announced event when there is one; D-52 phase 3) and
+B6dep (B6 plus WHEN to leave for the announced event's destination, two-leg plans on one common horizon).
 Each one drives the SAME UAVEnv through env.step(), so comparisons are fair.
 
     policy = make_policy("B2")
@@ -15,6 +16,7 @@ capped maps; uncapped maps; plus obstacles; full truth), to tell whether the age
 All settings are in config.yaml under `baselines:`.
 """
 import hashlib
+import itertools
 
 import numpy as np
 
@@ -562,9 +564,13 @@ class B6Forecast(B6GridAltitude):
             return s["m"]
         return min(s["m"], int(np.floor((time_s - s["t0"]) * s["m"] / s["tau"])) + 1)
 
+    def extrap_lead(self, lead):
+        """Seconds of velocity extrapolation used for a forecast `lead` seconds ahead (B6fc: all of it)."""
+        return lead
+
     def forecast(self, env, s, tt):
         """(xy, min_rate, rescue) of the forecast active users at time index tt >= now."""
-        lead = (tt - s["t"]) * env.dt
+        lead = self.extrap_lead((tt - s["t"]) * env.dt)
         xy = np.clip(s["xy"] + s["v"] * lead, 0.0, env.L) if lead > 0 else s["xy"]
         if "t0" in s:
             k = min(len(s["inA"]), self.switched(s, tt * env.dt) - self.switched(s, s["t"] * env.dt))
@@ -652,6 +658,352 @@ class B6Forecast(B6GridAltitude):
         self.target = (CX[j], CY[j], CH[j])
 
 
+# ---------------------------------------------------------------- B6dep: the departure-time planner (anticipation rule)
+def fly_two_legs(env, first, second, dep, n_steps):
+    """Positions (n_steps + 1, P, 3) of P planned flights from the drone's CURRENT state (position and velocity):
+    flight p flies go_to toward first[p] (x, y, h) at steps k < dep[p] and toward second[p] from step dep[p] on
+    (dep = inf: never leaves the first leg). Row k = the position k steps from now (row 0 = now). env.step's
+    kinematics (speed limits, acceleration limit, map and altitude clipping) driven by go_to's commands, braking
+    included, exactly as flight_steps; vectorised over the plans. Pure: reads only the drone's own state."""
+    u, dt, L = env.uav, env.dt, env.L
+    vmax, vzmax, a_max = u["v_max_mps"], u["vz_max_mps"], u.get("a_max_mps2")
+    first, second = np.asarray(first, dtype=float), np.asarray(second, dtype=float)
+    dep = np.asarray(dep, dtype=float)
+    n = len(dep)
+    x, y, h = np.full(n, env.x), np.full(n, env.y), np.full(n, env.h)
+    vx, vy, vz = np.full(n, env.vx), np.full(n, env.vy), np.full(n, env.vz)
+    out = np.empty((int(n_steps) + 1, n, 3))
+    for k in range(int(n_steps) + 1):
+        out[k, :, 0], out[k, :, 1], out[k, :, 2] = x, y, h
+        if k == n_steps:
+            break
+        tgt = np.where((k < dep)[:, None], first, second)
+        dx, dy, dh = tgt[:, 0] - x, tgt[:, 1] - y, tgt[:, 2] - h
+        dist = np.hypot(dx, dy)
+        if a_max is None:                                   # go_to, old model
+            cx, cy = dx / (vmax * dt), dy / (vmax * dt)
+            nrm = np.hypot(cx, cy)
+            sc = np.where(nrm > 1.0, 1.0 / np.maximum(nrm, 1e-300), 1.0)
+            cx, cy = cx * sc, cy * sc
+            cz = np.clip(dh / (vzmax * dt), -1.0, 1.0)
+        else:                                               # go_to with braking
+            s = np.minimum(np.minimum(vmax, dist / dt), brake_speed(dist, a_max, dt))
+            safe = np.where(dist > 0, dist, 1.0)
+            cx, cy = np.where(dist > 0, dx / safe * s / vmax, 0.0), np.where(dist > 0, dy / safe * s / vmax, 0.0)
+            sz = np.minimum(np.minimum(vzmax, np.abs(dh) / dt), brake_speed(np.abs(dh), u["az_max_mps2"], dt))
+            cz = np.sign(dh) * sz / vzmax
+        cx, cy, cz = np.clip(cx, -1, 1), np.clip(cy, -1, 1), np.clip(cz, -1, 1)          # env.step from here
+        hx, hy = cx * vmax, cy * vmax
+        nrm = np.hypot(hx, hy)
+        sc = np.where(nrm > vmax, vmax / np.maximum(nrm, 1e-300), 1.0)
+        hx, hy, hz = hx * sc, hy * sc, cz * vzmax
+        if a_max is not None:
+            ddx, ddy = hx - vx, hy - vy
+            nrm = np.hypot(ddx, ddy)
+            sc = np.where(nrm > a_max * dt, a_max * dt / np.maximum(nrm, 1e-300), 1.0)
+            hx, hy = vx + ddx * sc, vy + ddy * sc
+            az = u["az_max_mps2"] * dt
+            hz = vz + np.clip(hz - vz, -az, az)
+        nx, ny = np.clip(x + hx * dt, 0, L), np.clip(y + hy * dt, 0, L)
+        nh = np.clip(h + hz * dt, u["h_min_m"], u["h_max_m"])
+        vx, vy, vz = (nx - x) / dt, (ny - y) / dt, (nh - h) / dt
+        x, y, h = nx, ny, nh
+    return out
+
+
+class B6Depart(B6Forecast):
+    """B6dep (anticipation rule; reviewer's proposal after D-52 phase 4): B6 that also decides WHEN to leave for
+    where the announced event will put the demand. B6fc scores every candidate over its own window after its own
+    arrival, so far spots look good too early and it leaves too soon; B6dep scores whole two-leg plans on ONE common
+    horizon instead. Every K steps, while an announced move has not finished (now < t0 + tau):
+      S = B6's own choice now (the 'stay' leg);
+      post spots = the top_k of B6's candidates by forecast coverage at the end of the move (time t0 + tau, the
+                   B6fc forecast: the announced schedule plus velocity extrapolation, capped at extrap_cap_s);
+      plans = 'never leave' (fly to / hover at S to the end) plus, for every departure time d in now, now + 10 s,
+              ... up to t0 + tau and every post spot P: fly to S until d, then to P (go_to with braking; positions
+              from fly_two_legs, i.e. the env's own kinematics);
+      score = mean forecast coverage at the plan's position over the common horizon now, now + sample_s, ... < T.
+    It flies to P if the best plan leaves NOW, otherwise it does what B6 does (the stay leg). Ties (1e-12): 'never
+    leave' (B6) first, then the latest departure, then the better post spot.
+    Information: exactly B6fc's (the drone's own state, the users active now and their last-frame velocities, and the
+    announcement: t0, tau, share, sites A/B centres and radii). It never reads a future position, mask or the true
+    movers. Unannounced, no event, or after t0 + tau: exactly B6 (test). It does not read the battery."""
+    name = "B6dep"
+
+    def reset(self, env):
+        super().reset(env)
+        c = md.CFG["b6dep"]
+        self.top_k, self.dep_every = int(c["top_k"]), int(c["depart_every_s"])
+        self.dep_sample, self.cap = int(c["sample_s"]), c["extrap_cap_s"]
+
+    def extrap_lead(self, lead):
+        return lead if self.cap is None else min(lead, float(self.cap))
+
+    def plan(self, env):
+        B6GridAltitude.plan(self, env)                     # B6's own choice: the stay leg (and B6 itself)
+        if not self.announced(env):
+            return
+        sc, now = env.sc, env.t
+        t_end = float(sc["event_t0_s"]) + float(sc["tau_s"])           # the announced move is over by then (s)
+        if now * env.dt >= t_end:
+            return
+        S = np.array(self.target, dtype=float)
+        s = self.snapshot(env)
+        p_w = env.p_max_w * self.power
+        CX, CY, CH = self.candidates(env)
+        t_post = min(int(np.ceil(t_end / env.dt)), env.T - 1)
+        post = self.evaluate_forecast(env, s, t_post, np.column_stack([CX, CY, CH]), p_w)
+        top = np.argsort(-post, kind="stable")[: self.top_k]
+        P = np.column_stack([CX[top], CY[top], CH[top]])
+        step = int(round(self.dep_every / env.dt))
+        deps = np.arange(0, int(np.floor(t_end / env.dt)) - now + 1, step)            # steps from now
+        deps = deps[now + deps < env.T]
+        # plan 0 = never leave; then (d, rank) d-major
+        dep = np.concatenate([[np.inf], np.repeat(deps, len(top)).astype(float)])
+        second = np.vstack([S[None], np.tile(P, (len(deps), 1))])
+        rank = np.concatenate([[-1], np.tile(np.arange(len(top)), len(deps))])
+        horizon = env.T - now
+        pos = fly_two_legs(env, np.tile(S, (len(dep), 1)), second, dep, horizon - 1)
+        ks = np.arange(0, horizon, int(round(self.dep_sample / env.dt)))
+        score = np.zeros(len(dep))
+        for k in ks:
+            uniq, inv = np.unique(np.round(pos[k], 6), axis=0, return_inverse=True)
+            cov = self.evaluate_forecast(env, s, now + int(k), uniq, p_w)
+            score += cov[inv.ravel()]
+        score /= len(ks)
+        best = np.flatnonzero(score >= score.max() - 1e-12)
+        if best[0] == 0:                                   # 'never leave' among the best: B6
+            return
+        j = best[np.lexsort((rank[best], -dep[best]))[0]]  # latest departure, then the better post spot
+        if dep[j] == 0:
+            self.target = tuple(float(v) for v in second[j])
+
+    def evaluate_forecast(self, env, s, tt, nodes, p_w):
+        """Forecast coverage at time index tt of the drone at each row (x, y, h) of nodes."""
+        xy, mr, rs = self.forecast(env, s, tt)
+        return env.evaluate_users(xy, mr, rs, nodes[:, 0], nodes[:, 1], nodes[:, 2], p_w, tt)
+
+
+# ---------------------------------------------------------------- model mismatch: B6r, B6true, B6meas
+def refine_spot(env, x, y, h, p_w, model="nominal", value=None):
+    """Off-grid pattern search around (x, y, h) on a MODEL (env.evaluate(..., model=model)): at each probe distance s
+    of refine.steps_m (coarse to fine) score the 8 horizontal neighbours at s and the 2 altitude neighbours at +/- s/2
+    (clipped to the map and the altitude limits) in one vectorised call; move to the best one while it is strictly
+    better, then go to the next (smaller) s. Returns (x, y, h, coverage). Deterministic (ties: the first neighbour)."""
+    rc, u = md.CFG["refine"], env.uav
+    if value is None:
+        value = float(env.evaluate([x], [y], [h], p_w, model=model)[0])
+    dirs = np.array([[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]], dtype=float)
+    for s in rc["steps_m"]:
+        for _ in range(int(rc["max_moves_per_step"])):
+            NX = np.clip(np.r_[x + dirs[:, 0] * s, x, x], 0.0, env.L)
+            NY = np.clip(np.r_[y + dirs[:, 1] * s, y, y], 0.0, env.L)
+            NH = np.clip(np.r_[np.full(len(dirs), h), h + s / 2, h - s / 2], u["h_min_m"], u["h_max_m"])
+            cov = env.evaluate(NX, NY, NH, p_w, model=model)
+            j = int(np.argmax(cov))
+            if cov[j] <= value + 1e-12:
+                break
+            x, y, h, value = float(NX[j]), float(NY[j]), float(NH[j]), float(cov[j])
+    return x, y, h, value
+
+
+class B6Refined(B6GridAltitude):
+    """B6r: B6 (grid x altitude levels, every K steps, on the NOMINAL model) plus an off-grid pattern search
+    (refine_spot) from the chosen candidate. Separates 'finer placement' from 'knows the true channel'."""
+    name = "B6r"
+    model = "nominal"
+
+    def plan(self, env):
+        CX, CY, CH = self.candidates(env)
+        p_w = env.p_max_w * self.power
+        cov = env.evaluate(CX, CY, CH, p_w, model=self.model)
+        j = self.pick(env, cov, CX, CY, CH)
+        x, y, h, _ = refine_spot(env, CX[j], CY[j], CH[j], p_w, self.model, value=float(cov[j]))
+        self.target = (x, y, h)
+
+
+class B6True(B6Refined):
+    """B6true (UPPER BOUND, not a fair competitor): B6r scoring on the TRUE channel (env.evaluate(model="true")):
+    it knows the shadowing map, the true building loss and the hidden buildings. Equal to B6r without mismatch."""
+    name = "B6true"
+    model = "true"
+
+
+class MeasuredView:
+    """The ONLY window B6meas has on the world (level-1 information parity with the AI): its own state, the clock, the
+    NOMINAL model (env.evaluate(model="nominal") on the users now, like B6) and the aggregate coverage the drone
+    measured in the last second (env.prev["coverage"], the AI's `prev` observation). Anything else raises."""
+    _ALLOWED = ("x", "y", "h", "vx", "vy", "vz", "t", "dt", "L", "T", "uav", "p_max_w")
+
+    def __init__(self, env):
+        object.__setattr__(self, "_env", env)
+
+    def __getattr__(self, k):
+        if k in MeasuredView._ALLOWED:
+            return getattr(object.__getattribute__(self, "_env"), k)
+        raise AttributeError(f"B6meas may not read env.{k}")
+
+    def evaluate(self, X, Y, H, p_w):
+        return object.__getattribute__(self, "_env").evaluate(X, Y, H, p_w, model="nominal")
+
+    def measured_coverage(self):
+        return float(object.__getattribute__(self, "_env").prev["coverage"])
+
+
+def leg_time(ax, ay, ah, bx, by, bh, uav):
+    """Rough flight time (s) between two spots: horizontal at v_max, then vertical at vz_max (tour ordering only)."""
+    return float(np.hypot(bx - ax, by - ay) / uav["v_max_mps"] + abs(bh - ah) / uav["vz_max_mps"])
+
+
+class B6Measured(B6GridAltitude):
+    """B6meas: model-based proposal, measurement-based choice. Learning-free; level-1 information (MeasuredView):
+    the nominal model + the aggregate coverage it measures each second where it flies. Same flight cost as everyone.
+      1. survey  : B6's candidates scored on the NOMINAL model; the top-k spots at least min_sep_m apart (each at its
+                   best nominal altitude) are visited in the shortest open tour from the drone (brute force, k <= 5),
+                   and the coverage is measured for dwell_s seconds at each.
+      2. refine  : from the best MEASURED spot, a measured pattern search: probes at s = b6meas.steps_m (4 compass
+                   points, and altitude +/- s/2 if alt_probes) visited in nearest-neighbour order, probe_dwell_s each;
+                   the first probe that beats the centre by improve_min becomes the centre (the drone is already
+                   there) and the probes are rebuilt around it at the same s; otherwise the next smaller s. Only
+                   improving moves are kept.
+      3. hold    : fly to the centre and stay. Every recheck_s, if the measured coverage fell by more than
+                   recheck_drop below the committed value (the crowd moved), restart from 1.
+    It never reads the true channel, the shadowing map, the true building loss or the hidden buildings."""
+    name = "B6meas"
+
+    def reset(self, env):
+        super().reset(env)
+        self.c = md.CFG["b6meas"]
+        self.steps = list(self.c.get("steps_m") or md.CFG["refine"]["steps_m"])
+        self.mode, self.queue, self.samples, self.leg_t = "start", [], [], 0
+        self.measured, self.center, self.center_val, self.scale_i, self.t_commit = {}, None, None, 0, None
+        self.log = []                                     # (t, mode, x, y, h, measured value) for reports and tests
+        self.last_sample_t = -1
+
+    def act(self, env):
+        return self._act(MeasuredView(env))
+
+    # -- steps
+    def start_survey(self, v):
+        c = self.c
+        CX, CY, CH = self.candidates(v)
+        cov = v.evaluate(CX, CY, CH, v.p_max_w * self.power)
+        d = np.hypot(CX - v.x, CY - v.y)
+        order = np.lexsort((d, -cov))                     # best nominal first; ties: the closest
+        picks = []
+        for j in order:
+            if all(np.hypot(CX[j] - CX[i], CY[j] - CY[i]) >= c["min_sep_m"] for i in picks):
+                picks.append(int(j))
+            if len(picks) == int(c["k"]):
+                break
+        spots = [(float(CX[j]), float(CY[j]), float(CH[j])) for j in picks]
+        best, best_t = None, np.inf
+        for perm in itertools.permutations(range(len(spots))):
+            pos, tt = (v.x, v.y, v.h), 0.0
+            for i in perm:
+                tt += leg_time(*pos, *spots[i], v.uav)
+                pos = spots[i]
+            if tt < best_t - 1e-9:
+                best, best_t = perm, tt
+        self.queue = [(*spots[i], int(c["dwell_s"])) for i in best]
+        self.mode, self.measured, self.samples, self.leg_t = "survey", {}, [], 0
+
+    def probes(self, v):
+        """Unmeasured probes around the centre at the current scale, in nearest-neighbour order from the drone."""
+        s = float(self.steps[self.scale_i])
+        x, y, h = self.center
+        u = v.uav
+        pts = [(float(np.clip(x + dx * s, 0, v.L)), float(np.clip(y + dy * s, 0, v.L)), h)
+               for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
+        if self.c["alt_probes"]:
+            pts += [(x, y, float(np.clip(h + dh * s / 2, u["h_min_m"], u["h_max_m"]))) for dh in (1, -1)]
+        pts = [p for p in dict.fromkeys(pts) if p != self.center and self.key(p) not in self.measured]
+        out, pos = [], (v.x, v.y, v.h)
+        while pts:
+            i = int(np.argmin([leg_time(*pos, *p, u) for p in pts]))
+            pos = pts.pop(i)
+            out.append((*pos, int(self.c["probe_dwell_s"])))
+        return out
+
+    @staticmethod
+    def key(p):
+        return tuple(round(float(a), 3) for a in p[:3])
+
+    def next_scale(self, v):
+        """Probes at the current scale, or at the next smaller scales; when none are left, hold at the centre."""
+        while self.scale_i < len(self.steps):
+            self.queue = self.probes(v)
+            if self.queue:
+                return
+            self.scale_i += 1
+        self.mode, self.t_commit, self.queue = "hold", v.t, []
+
+    def on_measured(self, v, wp, value):
+        self.measured[self.key(wp)] = value
+        self.log.append((v.t, self.mode, *wp[:3], value))
+        self.queue.pop(0)
+        if self.mode == "survey":
+            if not self.queue:
+                k = max(self.measured, key=self.measured.get)
+                self.center, self.center_val, self.scale_i, self.mode = k, self.measured[k], 0, "refine"
+                self.next_scale(v)
+            return
+        if value > self.center_val + self.c["improve_min"]:           # refine: keep only improving moves
+            self.center, self.center_val = self.key(wp), value
+            self.next_scale(v)
+        elif not self.queue:
+            self.scale_i += 1
+            self.next_scale(v)
+
+    def _act(self, v):
+        c, tol = self.c, float(self.c["arrive_tol_m"])
+        if self.mode == "start":
+            self.start_survey(v)
+        if self.mode == "hold":
+            x, y, h = self.center
+            here = abs(v.x - x) <= tol and abs(v.y - y) <= tol and abs(v.h - h) <= tol
+            if here and v.t > 0 and (v.t - self.t_commit) % int(c["recheck_s"]) == 0 and v.t > self.t_commit:
+                if v.measured_coverage() < self.center_val - c["recheck_drop"]:
+                    self.start_survey(v)
+        while self.mode in ("survey", "refine") and self.queue:
+            wp = self.queue[0]
+            arrived = abs(v.x - wp[0]) <= tol and abs(v.y - wp[1]) <= tol and abs(v.h - wp[2]) <= tol
+            if arrived:
+                if v.t > 0 and v.t != self.last_sample_t:     # one measurement per second, at this spot
+                    self.samples.append(v.measured_coverage())
+                    self.last_sample_t = v.t
+            else:
+                self.leg_t += 1
+                if self.leg_t > c["max_leg_s"]:          # never reached: drop it unmeasured
+                    self.queue.pop(0)
+                    self.samples, self.leg_t = [], 0
+                    if not self.queue:
+                        self.on_empty(v)
+                    continue
+            if len(self.samples) >= wp[3]:
+                self.on_measured(v, wp, float(np.mean(self.samples)))
+                self.samples, self.leg_t = [], 0
+                continue                                  # the next waypoint (the drone may already be there)
+            break
+        if self.mode == "hold" or not self.queue:
+            self.target = self.center
+        else:
+            self.target = self.queue[0][:3]
+        return go_to(v, *self.target, self.power)
+
+    def on_empty(self, v):
+        if self.mode == "survey":
+            if self.measured:
+                k = max(self.measured, key=self.measured.get)
+                self.center, self.center_val, self.scale_i, self.mode = k, self.measured[k], 0, "refine"
+                self.next_scale(v)
+            else:
+                self.start_survey(v)
+        else:
+            self.scale_i += 1
+            self.next_scale(v)
+
+
 class B4PSO(Policy):
     """B4: particle swarm over (x, y, altitude, power) every K steps.
     Objective = the env's v2 reward at the candidate."""
@@ -715,11 +1067,163 @@ class B5EnergyAware(Policy):
             self.target = (env.x, env.y, BCFG["altitude_m"])             # stay where we are
 
 
+# ---------------------------------------------------------------- value of information: planners fed by phone reports
+class ReportsView:
+    """What a planner knows when the users' positions come only from their phones' GPS reports (contribution 2,
+    docs/prereg/value_of_info.md). Pure NumPy; reads the env's true users but never changes the env.
+    Towers are down, so the drone IS the network: an attached phone can send its GPS position (emergency-location
+    reporting), but only some phones do, with GPS error, and only every few seconds.
+      f       share of phones that report. Fixed per user and episode: user u reports iff U_u < f, U_u ~ U[0, 1) seeded
+              by (scenario, voi.rng_stream, rep), so the reporters at a smaller f are a subset of those at a larger f.
+      sigma_m GPS error: every report gets its own 2-D Gaussian error, std sigma_m per axis (E[t, u] = sigma_m Z[t, u],
+              Z standard normal, seeded once per episode, so every sigma uses the same Z); the reported position is
+              clipped to the map.
+      age_s   reporting interval (whole seconds): phone u reports at the times phase_u + k age_s (phase_u uniform
+              in {0, ..., age_s - 1}, seeded: phones are not synchronised), and once on attach (its first active
+              second; t = 0 for everyone in non-sites scenarios). The planner sees each phone's LAST report: age of
+              information in [0, age_s). age_s = 0: every phone reports every second (the planner sees now).
+    Belief at time t = the reporting phones whose last report (time t_r <= t) was sent while they were attached
+    (active at t_r), at their reported position (true position at t_r + error), with their own class and min rate
+    (they are in the report). A phone that has left since (competing sites: a mover deactivates) stays in the belief
+    at its stale position until its next scheduled report. Unreported users are INVISIBLE. In competing sites a mover
+    and its reserve twin at B are separate entries with separate report draws (re-attach = a new phone; expected
+    reporter share stays f).
+    Count scaling (f < 1; f is assumed known): k visible reporters stand for n_hat = round(k / f) users (rounded up
+    to even: NOMA pairs). The n_hat - k extra pseudo-users sit at the reporters' reported positions (copies split
+    evenly over the reporters, largest remainder, deterministic) and get classes from the config class mix
+    (explicit_classes: counts by largest remainder, interleaved along the list), because their classes are unknown.
+    f = 1, sigma_m = 0, age_s = 0 gives exactly env.users_now() (same users, order, values): B6rep == B6, bit for
+    bit."""
+
+    def __init__(self, env, f=None, sigma_m=None, age_s=None, rep=0):
+        c = md.CFG["voi"]
+        self.env = env
+        self.f = float(c["f"] if f is None else f)
+        self.sigma = float(c["sigma_m"] if sigma_m is None else sigma_m)
+        age = float(c["age_s"] if age_s is None else age_s)
+        assert 0.0 < self.f <= 1.0, f"report share f must be in (0, 1], not {self.f}"
+        assert self.sigma >= 0.0, "sigma_m must be >= 0"
+        assert age >= 0 and age == int(age), "age_s must be a whole number of seconds >= 0"
+        self.age = int(age)
+        n = env.P.shape[1]
+        key = [env.scenario_seed, int(c["rng_stream"]), int(rep)]
+        self.reports = np.random.default_rng(key + [0]).uniform(size=n) < self.f
+        ph = np.random.default_rng(key + [1]).uniform(size=n)
+        self.phase = np.floor(ph * self.age).astype(int) if self.age > 0 else np.zeros(n, int)
+        self.z = np.random.default_rng(key + [2]).standard_normal(size=env.P.shape) if self.sigma > 0 else None
+        if env.active is None:
+            self.first = np.zeros(n, int)
+        else:                                       # first active second (never active -> after the episode)
+            self.first = np.where(env.active.any(axis=0), np.argmax(env.active, axis=0), env.P.shape[0])
+        names = list(md.CFG["classes"])
+        mix = np.array([md.CFG["classes"][k]["share"] for k in names], dtype=float)
+        self.mix = mix / mix.sum()
+        self.class_rate = np.array([md.CFG["classes"][k]["min_rate_bps"] for k in names], dtype=float)
+        self.rescue_idx = names.index("rescue")
+
+    def last_report(self, t):
+        """Time index of every phone's last report at or before t (attach report included)."""
+        n = len(self.reports)
+        tr = np.full(n, int(t)) if self.age == 0 else t - np.mod(t - self.phase, self.age)
+        return np.maximum(tr, self.first)
+
+    def visible(self, t=None):
+        """(indices, report times) of the users the planner sees at time index t (default now)."""
+        env = self.env
+        t = env.t if t is None else int(t)
+        tr = self.last_report(t)
+        ok = self.reports & (self.first <= t)
+        if env.active is not None:
+            ok &= env.active[np.minimum(tr, env.P.shape[0] - 1), np.arange(len(tr))]
+        idx = np.flatnonzero(ok)
+        return idx, tr[idx]
+
+    def belief(self, t=None):
+        """(xy (k, 2), min_rate (k,), rescue (k,)) of the planner's belief at time index t (default now)."""
+        env = self.env
+        idx, tr = self.visible(t)
+        xy = env.P[tr, idx]
+        if self.sigma > 0:
+            xy = np.clip(xy + self.sigma * self.z[tr, idx], 0.0, env.L)
+        mr, rs = env.min_rate[idx], env.rescue[idx]
+        k = len(idx)
+        if self.f < 1.0 and k > 0:
+            n_hat = int(round(k / self.f))
+            n_hat += n_hat % 2
+            n_fill = n_hat - k
+            if n_fill > 0:
+                copies = allocate(np.ones(k), n_fill)
+                cls = explicit_classes(np.tile(self.mix, (n_fill, 1)))
+                xy = np.vstack([xy, np.repeat(xy, copies, axis=0)])
+                mr = np.concatenate([mr, self.class_rate[cls]])
+                rs = np.concatenate([rs, cls == self.rescue_idx])
+        return xy, mr, rs
+
+
+def belief_coverage(env, view, X, Y, H, p_w):
+    """Coverage the planner EXPECTS at the candidates, computed with env.evaluate's physics on its belief (zeros if the
+    belief holds fewer than 2 users: nothing to plan on, the pilot then stays where it is)."""
+    xy, mr, rs = view.belief()
+    if len(xy) < 2:
+        return np.zeros(len(np.atleast_1d(X)))
+    return env.evaluate_users(xy, mr, rs, X, Y, H, p_w, env.t)
+
+
+class _Reports:
+    """Mixin: a planner that sees the users only through phone reports (ReportsView). Parameters from config `voi:`
+    unless given."""
+
+    def __init__(self, f=None, sigma_m=None, age_s=None, rep=0):
+        self.voi = dict(f=f, sigma_m=sigma_m, age_s=age_s, rep=rep)
+
+    def reset(self, env):
+        super().reset(env)
+        self.view = ReportsView(env, **self.voi)
+
+
+class B6Reports(_Reports, B6GridAltitude):
+    """B6rep: B6's search (grid x altitude levels + 'stay', every K steps, ties to the closest), scored on the belief
+    built from phone reports instead of the true users. The drone still serves the TRUE users (env.step unchanged)."""
+    name = "B6rep"
+
+    def plan(self, env):
+        CX, CY, CH = self.candidates(env)
+        cov = belief_coverage(env, self.view, CX, CY, CH, env.p_max_w * self.power)
+        j = self.pick(env, cov, CX, CY, CH)
+        self.target = (CX[j], CY[j], CH[j])
+
+
+class B3Reports(_Reports, B3GridSearch):
+    """B3rep: B3's search (grid at the fixed altitude + the current spot), scored on the phone-report belief."""
+    name = "B3rep"
+
+    def score(self, env, X, Y, H, p_w):
+        return belief_coverage(env, self.view, X, Y, H, p_w)
+
+
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
-            "B6": B6GridAltitude, "B7": B7Loiter, "B8": B8BatteryAware, "B6fc": B6Forecast,
+            "B6": B6GridAltitude, "B6r": B6Refined, "B6true": B6True, "B6meas": B6Measured,
+            "B7": B7Loiter, "B8": B8BatteryAware, "B6fc": B6Forecast, "B6dep": B6Depart,
             "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles,
             "B3obsN": B3ObsN, "B3obsUN": B3ObsUncappedN}
+# Parametrised pilots, NOT in POLICIES (so no default run list changes). Name them as "B6rep:f=0.2,sigma=10,age=30".
+REP_POLICIES = {"B6rep": B6Reports, "B3rep": B3Reports}
+
+
+def parse_rep(name):
+    """'B6rep:f=0.2,sigma=10,age=30[,rep=0]' -> (class, kwargs). Missing keys come from config `voi:`."""
+    base, _, args = name.partition(":")
+    keys = {"f": "f", "sigma": "sigma_m", "age": "age_s", "rep": "rep"}
+    kw = {}
+    for a in filter(None, args.split(",")):
+        k, v = a.split("=")
+        assert k in keys, f"unknown report parameter {k!r} in {name!r}; use f, sigma, age, rep"
+        kw[keys[k]] = int(v) if k == "rep" else float(v)
+    return REP_POLICIES[base], kw
 
 
 def make_policy(name):
+    if name.partition(":")[0] in REP_POLICIES:
+        cls, kw = parse_rep(name)
+        return cls(**kw)
     return POLICIES[name]()

@@ -173,8 +173,11 @@ def sample_times(env):
 
 
 def _cache_key(env):
-    # b6fc: the forecasting pilot's own section (added later; excluded so the existing caches stay valid)
-    cfg = {k: v for k, v in CFG.items() if k not in ("rl", "profiles", "active_profile", "oracle", "b6fc")}
+    # Sections added later and read only by other pilots (b6fc, b6dep, voi, refine, b6meas) or by other runners
+    # (hybrid, oracle) are excluded so the existing caches stay valid; `mismatch` counts only when it is on (off, the
+    # true world IS the nominal model, so the tensor is the same)
+    skip = ("rl", "profiles", "active_profile", "oracle", "b6fc", "b6dep", "hybrid", "voi", "refine", "b6meas")
+    cfg = {k: v for k, v in CFG.items() if k not in skip and not (k == "mismatch" and not md.mismatch_on())}
     blob = json.dumps([cfg, OCFG["sample_every_s"], env.access, env.sic_eps, env.rescue_first,
                        env.scenario_overrides], sort_keys=True, default=str)
     return hashlib.sha1(blob.encode()).hexdigest()[:12]

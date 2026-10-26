@@ -483,3 +483,44 @@ location reports. The owner also realised that a drone base station can help **f
 asked to finish fast: four agents now work in parallel (the anticipation rule with the departure-time pilot, the hybrid
 timing AI, the location-information study, a first draft of the final report), with training on Kaggle. The quadcopter
 model and 3D view (Stage 5) were built the same day (4.9).
+
+## 2026-10-24
+
+### 57. The four studies finish: one pass and three honest negatives
+All four studies of D-56 ran to their pre-registered end (two late on 10-23, two on 10-24), each with its rules committed
+before the main runs. **Location information (7.14): PASSED.** B6 keeps 98% of its full-information coverage when about half
+of the phones report on moving crowds, and only 5% on the competing sites; 10 m vs 50 m GPS error makes no difference, but
+reports older than about 30 s cost coverage where people move away. **The anticipation rule (7.15): NOT CONFIRMED.** The
+formula fitted on the 9 old designs predicted the 8 new ones with R^2 0.576 (needed 0.7) and called room / no room right in
+5 of 8 (needed 7); drone speed and mission length behave differently from the formula. On the way the departure-time pilot
+B6dep became the best simple pilot everywhere, and the gap analysis showed the full AI's shortfall is not learning but
+information, altitude and above all using the announcement. **Hybrid timing AI (8.10): NOT MET.** It beats plain B6 (+0.041 /
++0.014) and ties the bar on the sudden design (0.752 vs 0.756), but loses on the 1-minute design (0.734 vs 0.753); even
+perfect timing would add only about 0.01 over the bar. **Wrong physics (8.11): NOT MET.** The pre-registered grid had no room;
+in two larger exploratory doses the AI stays below a pilot that measures and searches (-0.039, -0.101), although with 8 hidden
+buildings it ties plain B6. NOMA beat equally optimised OMA in every one of these runs (+0.08 to +0.13, 13.11). The training
+ran on Kaggle; local and Kaggle runs of the same episodes were bit-identical where both exist.
+
+### 58. A real place: the Kathmandu flood case
+A scenario based on the September 2024 Kathmandu (Bagmati) floods was built (7.16): 12,061 OpenStreetMap buildings with
+heights, a 3-D line of sight from every phone to the drone, and a flood crowd reconstructed with written-down assumptions
+(not real data; credit "(c) OpenStreetMap contributors"). The pilots rank exactly as on the synthetic maps (B6 0.781 with
+NOMA vs 0.654 with OMA), and NOMA's gain for the searching pilots is about twice the synthetic one. Flag for the report: B6
+flies at about 290 m, far above the roughly 120 m that civil drone rules usually allow; a 120 m run is still to do.
+
+## 2026-10-26
+
+### 59. Kathmandu merged; two CI fixes; the four studies integrated
+The owner merged the Kathmandu case (PR #22). CI on GitHub needed two test-only fixes first: `test_place.py` now restores the
+profiles table on teardown (switching profiles never deletes keys, so a key a test added leaked into `test_profiles.py`), and
+`test_quadsim.py` compares its fingerprint to a relative 1e-12 instead of exactly (the CI machines' CPUs differ from the
+laptop in numpy's last bits). The four study branches were then merged into one integration branch (9.5): the conflicts were
+only "both sides added something" (pilot list, cache keys, the radio channel), and every side was kept; where the real-place
+buildings and the wrong-physics option meet, the code now refuses the combination loudly instead of silently ignoring one.
+The full test suite and lint pass (9.4).
+
+### 60. GO for "find and serve"
+The owner gave the GO for a new small study (D-57): the drone first **finds** survivors' phones from the strength of their
+uplink signal, then **serves** them with NOMA. It is being built and reviewed now, with its pass marks written down before
+any result; simulation only. A real deployment would need a mobile operator and the regulator as partners and is out of
+scope.

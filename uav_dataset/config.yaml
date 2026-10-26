@@ -136,6 +136,52 @@ obstacles:
   size_range_m: [40, 150]       # width and height of each rectangle
   excess_loss_db: 15.0          # ENGINEERING ASSUMPTION: extra loss on a blocked link (sensitivity range 10-25)
 
+# Model mismatch ("the AI helps when reality does not match the textbook model"; results/mismatch/). ALL OFF by default:
+# with these defaults the game is the old one, bit for bit. When on, the TRUE world (env.step: who is really served;
+# the radio layer allocates with the true gains, as a base station that measures its channels) differs from the
+# NOMINAL textbook model above (Al-Hourani mean path loss + obstacles.excess_loss_db on the known buildings), which the
+# model-based pilots (B3, B6, ...) keep using to plan (env.evaluate(model="nominal")). Every value is an ENGINEERING
+# ASSUMPTION (no primary source verified; to read: 3GPP TR 36.777 Annex B, TR 38.901 shadow fading, Al-Hourani et al.
+# Globecom 2014). Each perturbation has its own rng stream (scenario seed, stream, draw).
+# (c) "true Al-Hourani parameters of another environment class" is NOT built: the project has not verified any
+# (a, b, eta_LoS, eta_NLoS) row besides the one above (docs/assumptions.md), so there is no sourced value to use.
+mismatch:
+  draw: 0                       # perturbation draw id: 1, 2, ... re-draw every perturbation of a scenario (check that
+                                # a policy did not memorise one map)
+  shadow_sigma_db: 0.0          # (a) user-side correlated log-normal shadowing, std at grazing elevation (dB);
+                                # std(theta) = sigma * (1 - theta/90). Room grid {0, 4, 8}; range 0-12
+  shadow_corr_m: 50.0           # correlation length of the user-side field (m; correlation 1/e at this distance).
+                                # Room grid {25, 50, 150}; range 10-200
+  shadow_res_frac: 0.25         # ENGINEERING CHOICE: field grid spacing = corr x this (bilinear interpolation)
+  excess_loss_db: null          # (b) TRUE loss of a blocked link (dB); null = the planner's obstacles.excess_loss_db.
+                                # Room grid {25} vs the nominal 15; range 10-30
+  hidden_obstacles: 0           # (d) extra buildings in the true world only (absent from the planner's map), same
+                                # size range as obstacles. Room grid {0, 2, 4}
+
+# Off-grid refinement (pattern search) for B6r / B6true and the measured search of B6meas (reviewer amendment 2:
+# so a continuous-action AI cannot win by grid resolution alone). ENGINEERING CHOICES.
+refine:
+  steps_m: [100, 50, 25]        # horizontal probe distances, coarse to fine; altitude probes are half of these
+  max_moves_per_step: 20        # cap on improving moves at one probe distance (B6r / B6true only)
+
+# B6meas (learning-free adaptive baseline, level 1 information parity with the AI: aggregate MEASURED coverage each
+# second + the nominal model + its own flight). See baselines.B6Measured. Tuned on design seeds 10000-10009 x cells
+# mm_none, mm_bl25, mm_s8_c50, mm_h4 (16 variants, mismatch_exp.py tune; never val), then FROZEN at the best mean:
+# k 3, dwell 2 s, no altitude probes, steps [50, 25] (0.8489 vs B6 0.8468 on the same; table in room.md).
+b6meas:
+  k: 3                          # nominal top-k spots surveyed (tuned over {3, 5})
+  min_sep_m: 300                # the k spots are at least this far apart horizontally
+  dwell_s: 2                    # seconds measured at each surveyed spot (tuned over {2, 10})
+  probe_dwell_s: 2              # seconds measured at each pattern-search probe
+  steps_m: [50, 25]             # probe distances of the measured pattern search; null = refine.steps_m (tuned over
+                                # {[100, 50, 25], [50, 25]})
+  alt_probes: false             # pattern search also probes altitude +/- step/2 (tuned over {false, true})
+  improve_min: 0.002            # a probe must beat the centre's measured coverage by this much to be kept
+  recheck_s: 30                 # on station: every recheck_s compare the measured coverage with the committed one ...
+  recheck_drop: 0.05            # ... and restart (nominal re-plan + survey) if it fell by more than this
+  arrive_tol_m: 0.5             # arrived = within this distance horizontally and vertically
+  max_leg_s: 120                # give up a leg after this long (never happens on the 2 km map at 15 m/s)
+
 # small-scale fading (Phase 4). Off = average channel (deterministic baselines, dataset sweep).
 fading:
   enabled: false
@@ -283,6 +329,16 @@ baselines:
   # B3obs / B3obsU / B3obsUO (information ladder): B3's search, but scored on a pseudo-crowd rebuilt from the maps.
   obs_pseudo_users: 500         # ENGINEERING ASSUMPTION: crowd size they assume (mean of n_users_choices; must be even)
 
+# Value of information (contribution 2, docs/prereg/value_of_info.md; baselines.ReportsView, pilots B6rep / B3rep):
+# the planner sees the users only through phone GPS reports. Defaults = full information (B6rep == B6, bit for bit).
+# Pilots override these per run, e.g. "B6rep:f=0.2,sigma=10,age=30". Used by no other pilot and no default.
+voi:
+  f: 1.0                        # share of phones that report (fixed per user and episode); 1/f is assumed known
+  sigma_m: 0.0                  # GPS error std per axis, m (2-D Gaussian, a fresh draw per report). ENGINEERING
+                                # ASSUMPTION for the scale: consumer GPS ~5-10 m open sky, tens of m in rubble/urban canyons
+  age_s: 0                      # reporting interval, s (each phone reports at its own phase, and once on attach)
+  rng_stream: 7100              # rng key (scenario, 7100, rep, k): k 0 = who reports, 1 = report phases, 2 = GPS errors
+
 # B6fc, the forecasting greedy pilot (D-52 phase 3; baselines.B6Forecast). Every K steps it scores B6's candidates by
 # the mean coverage over [arrival, arrival + window_s] for a FORECAST of the active users (velocity extrapolation from the
 # last frame; in announced competing-sites cells also the announced A -> B move). Used by no other pilot and no default.
@@ -295,6 +351,17 @@ b6fc:
   screen_top: null              # null = full rule. K = ENGINEERING CHOICE for run time: score every candidate at one
                                 # forecast time (mid-window) first, then the full window only for the K best (+ B6's
                                 # choice and 'stay'); sites_exp phase 4 sets it (SCREEN_TOP) and reports the agreement
+
+# B6dep, the departure-time planner (baselines.B6Depart; anticipation rule). With an announced event that is not over
+# yet, every K steps it scores two-leg plans "stay at B6's choice until departure d, then fly to one of the top_k
+# spots for the end of the move" (and "never leave") on one common horizon (now .. episode end) with B6fc's forecast.
+# Used by no other pilot and no default.
+b6dep:
+  top_k: 3                      # reviewer's proposal: the 3 best spots for the end of the move
+  depart_every_s: 10            # departure times now, now + 10 s, ... up to t0 + tau (the decision rhythm)
+  sample_s: 5                   # ENGINEERING CHOICE: forecast coverage every 5 s of the horizon (the oracle's grid)
+  extrap_cap_s: 60              # ENGINEERING CHOICE: velocity extrapolation used for at most 60 s ahead (= b6fc.window_s);
+                                # walkers turn inside their site, so a longer straight-line extrapolation is not a forecast
 
 # Clairvoyant oracle (book 14.6 step 3, oracle.py): how much could ANTICIPATION add over the best myopic pilot B6?
 # It knows the crowd's future and plans over B6's own candidates (grid_n x grid_n x altitude_levels_m + the start spot).
@@ -365,9 +432,54 @@ profiles:
   sites_d20_t0: {<<: *sites, sites: {distance_m: 2000, tau_s: 0}}
   sites_d20_t60: {<<: *sites, sites: {distance_m: 2000, tau_s: 60}}
   sites_d20_t180: {<<: *sites, sites: {distance_m: 2000, tau_s: 180}}
+  # Anticipation rule (pre-registered test cells, docs/prereg/anticipation_rule.md; anticip_exp.py): sites_base with
+  # ONE more thing changed each: the drone's top speed (v8 / v25 m/s), the episode length (T600: 600 s, event start
+  # range scaled x2), or an off-grid distance / ramp. Batteries are ENGINEERING CHOICES so that every pilot lasts the
+  # episode (the headroom is energy-free by design, as in D-52): 24 Wh at 25 m/s (fast flight costs more than
+  # hovering), 40 Wh for 600 s (hover alone needs ~29 Wh).
+  sites_v8_d15_t60: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 8}, sites: {distance_m: 1500, tau_s: 60}}
+  sites_v25_d15_t60: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 25}, energy: {battery_wh: 24},
+                      sites: {distance_m: 1500, tau_s: 60}}
+  sites_v8_d20_t0: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 8}, sites: {distance_m: 2000, tau_s: 0}}
+  sites_v25_d20_t0: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 25}, energy: {battery_wh: 24},
+                     sites: {distance_m: 2000, tau_s: 0}}
+  sites_T600_d20_t0: {<<: *sites, mobility: {choices: [sites], episode_steps: 600}, energy: {battery_wh: 40},
+                      sites: {distance_m: 2000, tau_s: 0, t0_range_s: [120, 300]}}
+  sites_T600_d15_t60: {<<: *sites, mobility: {choices: [sites], episode_steps: 600}, energy: {battery_wh: 40},
+                       sites: {distance_m: 1500, tau_s: 60, t0_range_s: [120, 300]}}
+  sites_d175_t30: {<<: *sites, sites: {distance_m: 1750, tau_s: 30}}
+  sites_d125_t120: {<<: *sites, sites: {distance_m: 1250, tau_s: 120}}
   # G5 training cells with the ANNOUNCED schedule (owner, D-54): the AI sees event_countdown + event_announce
   sites_d20_t0_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 0, announced: true}}
   sites_d20_t60_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 60, announced: true}}
+  # Model mismatch (results/mismatch/): `rl_static` (still crowds) with the owner's G5 settings (D-48), and one
+  # perturbation type per cell. mm_s<sigma>_c<corr> = user-side shadowing; mm_bl25 = true building loss 25 dB (planner
+  # 15); mm_h<n> = n hidden buildings; mm_none = no mismatch (negative control). mm_hard_* = the same on `hard`
+  # (robustness check only).
+  mm_none: &mm
+    area_m: 2000
+    uav: {p_max_dbm: 20, a_max_mps2: 4}
+    obstacles: {n_range: [3, 8], size_range_m: [60, 200]}
+    mobility: {choices: [static]}
+    energy: {battery_wh: 16}
+    baselines: {grid_n: 14}
+    env: {access: noma_opt}
+    access: {sic_eps: 0.05, rescue_first: true}
+  mm_s4_c25: {<<: *mm, mismatch: {shadow_sigma_db: 4, shadow_corr_m: 25}}
+  mm_s4_c50: {<<: *mm, mismatch: {shadow_sigma_db: 4, shadow_corr_m: 50}}
+  mm_s4_c150: {<<: *mm, mismatch: {shadow_sigma_db: 4, shadow_corr_m: 150}}
+  mm_s8_c25: {<<: *mm, mismatch: {shadow_sigma_db: 8, shadow_corr_m: 25}}
+  mm_s8_c50: {<<: *mm, mismatch: {shadow_sigma_db: 8, shadow_corr_m: 50}}
+  mm_s8_c150: {<<: *mm, mismatch: {shadow_sigma_db: 8, shadow_corr_m: 150}}
+  mm_bl25: {<<: *mm, mismatch: {excess_loss_db: 25}}
+  mm_h2: {<<: *mm, mismatch: {hidden_obstacles: 2}}
+  mm_h4: {<<: *mm, mismatch: {hidden_obstacles: 4}}
+  # EXPLORATORY (added after the room test found no passing cell; not in the pre-registered grid): a larger dose
+  mm_h8: {<<: *mm, mismatch: {hidden_obstacles: 8}}
+  mm_combo: {<<: *mm, mismatch: {shadow_sigma_db: 8, shadow_corr_m: 150, excess_loss_db: 25, hidden_obstacles: 4}}
+  mm_hard_none: &mmh
+    <<: *mm
+    mobility: {choices: [hotspot_jump, surge, group_drift, attraction]}
 
   # Real-place case study (docs/case_nepal/): Kathmandu, Bagmati floods (a scenario based on Sept 2024), OSM buildings
   # as height-aware obstacles, the reconstructed flood crowd (section `place:`) and the owner's G5 settings (D-48).
@@ -427,3 +539,24 @@ rl:
     gradient_steps: 1
     ent_coef: auto
     net_arch: [256, 256]
+
+# Hybrid timing AI (owner-approved; hybrid.py, hybrid_train.py, pre-registration docs/prereg/hybrid_timing.md).
+# B6 decides WHERE, a small PPO policy decides only WHEN to leave for the announced destination (Discrete(2) every
+# baselines.replan_every_steps). Used by nothing else; excluded from the oracle's and the hybrid's cache keys.
+hybrid:
+  obs_groups: [pos, vel, battery, time, prev, crowd_n, history, event_countdown, event_announce, heat_all_u,
+               heat_rescue_u]   # the G5 observation (raw groups + the announcement, D-54)
+  train_seeds: [10000, 10199]   # FIXED training pool (fresh procedural scenarios, disjoint from val/test)
+  timesteps: 100000             # decisions per training run (Round A, pre-registered)
+  train_seeds_per_cell: 3       # Round A: PPO training seeds 0..2 (seeds 3, 4 only if Round A beats the bar)
+  gamma: 0.95
+  ent_coef: 0.01                # ENGINEERING CHOICE: keeps the binary choice exploring early (categorical head)
+  net_arch: [64, 64]
+  n_envs: 4
+  n_steps: 256
+  batch_size: 256
+  n_epochs: 10
+  learning_rate: 0.0003
+  gae_lambda: 0.95
+  clip_range: 0.2
+  checkpoint_every: 25000       # decisions; checkpoints are for crash recovery only (the FINAL model is evaluated)

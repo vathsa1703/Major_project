@@ -225,8 +225,8 @@ def _b7_run(env, steps, monkeypatch, best=BEST):
 def test_b7_is_registered_but_not_in_the_default_run():
     import run_baselines
     assert "B7" in run_baselines.POLICIES and isinstance(make_policy("B7"), B7Loiter)
-    import inspect
-    assert 'p != "B7"' in inspect.getsource(run_baselines.main)
+    # the default list now lives in run_baselines.default_policies() (checked by behaviour, not by reading the source)
+    assert "B7" not in run_baselines.default_policies()
 
 
 def test_b7_flies_a_circle_of_radius_r_at_the_loiter_speed(limit_on, monkeypatch):

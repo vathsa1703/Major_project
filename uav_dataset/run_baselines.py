@@ -117,13 +117,20 @@ def report(df, profile, battery_wh=None):
     return head + "\n\n" + summarize(df)
 
 
+def default_policies():
+    """The pilots run when --policies is not given. The information-ladder pilots B3obs*, the loiter pilots B7, B8 and
+    the study pilots B6dep (anticipation) and B6r / B6true / B6meas (model mismatch) run only when named, so the default
+    list is the same as before those studies were merged."""
+    opt_in = ("B7", "B8", "B6dep", "B6r", "B6true", "B6meas")
+    return [p for p in POLICIES if not p.startswith("B3obs") and p not in opt_in]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=None, help="use only the first N eval seeds")
-    ap.add_argument("--policies", default=",".join(p for p in POLICIES
-                                                   if not p.startswith("B3obs") and p != "B7" and p != "B8"),
-                    help="default: B0-B6 (the information-ladder pilots B3obs* and the loiter pilots B7, B8 only when "
-                         "named)")
+    ap.add_argument("--policies", default=",".join(default_policies()),
+                    help="default: B0-B6 and B6fc (the information-ladder pilots B3obs*, the loiter pilots B7, B8 and "
+                         "the study pilots B6dep, B6r, B6true, B6meas only when named)")
     ap.add_argument("--battery_wh", type=float, default=None, help="override energy.battery_wh")
     ap.add_argument("--tag", default=None, help="suffix for the output files (default: _<profile>)")
     ap.add_argument("--profile", default="default", help="config profile: default, lowpower, bigarea, hard")

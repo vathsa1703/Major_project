@@ -33,6 +33,9 @@ Opt-in extras (Track 2; the default observation above is unchanged):
   Only the users active at t count: coverage denominator, radio resources (every access scheme runs on the active subset
   with the scenario's fixed total bandwidth), evaluate(t), the maps and the critic-only state. Without a mask (every
   other scenario) the arrays are the full ones, exactly as before.
+  Model mismatch (config `mismatch:`, off by default): env.step serves users through the TRUE channel (user-side
+  shadowing, a different building loss, hidden buildings), while evaluate(model="nominal") (the default, used by every
+  planner) keeps the textbook model; evaluate(model="true") is for the B6true upper bound only. See gains().
   obs_mode="dict"           gymnasium Dict observation: "maps" (C, grid, grid) and "scalars" (vector)
   privileged=True           (dict mode only) adds "priv_maps" and "priv_n": the TRUE state, for an asymmetric critic
                             during training only. The acting policy never reads them (see rl_net.DictMapExtractor and
@@ -165,6 +168,7 @@ class UAVEnv(gym.Env):
         links = md.scenario_links(self.scenario_seed, self.sc, self.users)
         self.place_links = None if isinstance(links, np.ndarray) else links
         self.boxes = links if self.place_links is None else np.zeros((0, 4))
+        self._make_true_world()
         self.P, self.V = md.simulate_positions(self.scenario_seed, self.sc, self.users)   # (T+1, n, 2)
         self.active = md.activity_mask(self.users, self.T, self.dt)    # (T+1, n) bool, or None = everyone counts
         self.min_rate = self.users["min_rate_bps"].values
@@ -191,6 +195,36 @@ class UAVEnv(gym.Env):
         """What channel_gain gets as obstacles: the rectangles env.boxes (every synthetic scenario; read at call time,
         so code that edits env.boxes still takes effect), or the height-aware place.PlaceLinks of a real place."""
         return self.boxes if self.place_links is None else self.place_links
+
+    def _make_true_world(self):
+        """Model mismatch (config `mismatch:`): the TRUE world's buildings, building loss and user-side shadowing
+        field. Off (the default): the true world IS the nominal model (same objects), so every result is bit-exact.
+        Not defined for a real-place scenario (height-aware buildings): mismatch on + a place raises."""
+        m = md.mismatch_cfg()
+        if md.mismatch_on() and self.place_links is not None:
+            raise NotImplementedError("model mismatch is not defined for real-place scenarios (place.PlaceLinks)")
+        draw = int(m.get("draw", 0) or 0)
+        hidden = md.hidden_obstacles(self.scenario_seed, int(m.get("hidden_obstacles", 0) or 0), draw)
+        self.true_boxes = np.vstack([self.boxes, hidden]) if len(hidden) else self.boxes
+        self.true_excess_db = m.get("excess_loss_db")                  # None = the nominal value
+        sigma = float(m.get("shadow_sigma_db", 0.0) or 0.0)
+        self.shadow_sigma_db = sigma
+        self.shadow_field = (md.ShadowField(self.scenario_seed, self.L, m["shadow_corr_m"],
+                                            m.get("shadow_res_frac", 0.25), draw) if sigma > 0 else None)
+        self.mismatch = md.mismatch_on()
+
+    def gains(self, ux, uy, X, Y, H, model="true", rng=None, fading=None):
+        """Channel gains (P, N) from drones (X, Y, H) to users (ux, uy). model="nominal" = the textbook model the
+        planners use (known buildings, obstacles.excess_loss_db, no shadowing); "true" = the world env.step serves
+        (with the mismatch, if any). Identical when the mismatch is off."""
+        assert model in ("nominal", "true"), f"model must be 'nominal' or 'true', not {model!r}"
+        if model == "nominal" or not self.mismatch:
+            return md.channel_gain(ux, uy, X, Y, H, self.links, rng, fading)
+        shadow = None
+        if self.shadow_field is not None:
+            shadow = (self.shadow_field.at(ux, uy), self.shadow_sigma_db)
+        return md.channel_gain(ux, uy, X, Y, H, self.true_boxes, rng, fading, excess_loss_db=self.true_excess_db,
+                               shadow=shadow)
 
     def observation(self, groups=None, dict_obs=None, history_every=None, privileged=None):
         """The current observation. `groups` picks a subset of observation groups (a trained agent asks for the
@@ -231,23 +265,25 @@ class UAVEnv(gym.Env):
         return [self.sc["site_x"][0] / self.L, self.sc["site_y"][0] / self.L, self.sc["site_x"][1] / self.L,
                 self.sc["site_y"][1] / self.L, float(self.sc["event_share"]), float(self.sc["tau_s"]) / T]
 
-    def evaluate(self, X, Y, H, p_w, t=None):
+    def evaluate(self, X, Y, H, p_w, t=None, model="nominal"):
         """Coverage the drone WOULD get at each candidate position (X, Y, H arrays) with transmit power p_w (W),
         for the user positions at time index t (default: now, env.t). Average channel (no fading). Does not change
         env state or the env rng. Used by the search baselines (B3, B4, B5, B6) and, with a future t, by the
-        clairvoyant oracle (oracle.py)."""
+        clairvoyant oracle (oracle.py).
+        model: "nominal" (default) = the textbook model a planner has; "true" = the world env.step serves (with the
+        model mismatch, if any; only the B6true upper bound may use it). The same thing when the mismatch is off."""
         t = self.t if t is None else int(t)
         xy, min_rate, rescue = self.users_now(t)          # only the users active at t (all, without a mask)
-        return self.evaluate_users(xy, min_rate, rescue, X, Y, H, p_w, t)
+        return self.evaluate_users(xy, min_rate, rescue, X, Y, H, p_w, t, model=model)
 
-    def evaluate_users(self, xy, min_rate, rescue, X, Y, H, p_w, t):
+    def evaluate_users(self, xy, min_rate, rescue, X, Y, H, p_w, t, model="nominal"):
         """env.evaluate for a GIVEN user set (positions xy (n, 2), min rates, rescue flags) instead of the users at
         time index t: the same physics, access scheme, bandwidth and rng recipe (seeded by (scenario, t); used only by
         the fixed schemes with random pairing). evaluate(..., t) == evaluate_users(*users_now(t), ..., t). Used by B6fc
         to score a FORECAST user set (baselines.B6Forecast)."""
         ux, uy = np.asarray(xy, dtype=float).T
         X, Y, H = (np.atleast_1d(np.asarray(a, dtype=float)) for a in (X, Y, H))
-        gains = md.channel_gain(ux, uy, X, Y, H, self.links)
+        gains = self.gains(ux, uy, X, Y, H, model=model)
         rng = np.random.default_rng([self.scenario_seed, t])
         if self.access in md.QOS_SCHEMES:                 # vectorised over all candidates at once
             return self.access_rates(gains, p_w, return_info=True, min_rate=min_rate,
@@ -323,8 +359,10 @@ class UAVEnv(gym.Env):
 
         xy, min_rate, rescue = self.users_now()           # only the users that count now (all, without a mask)
         ux, uy = xy.T
-        g = md.channel_gain(ux, uy, np.array([self.x]), np.array([self.y]), np.array([self.h]), self.links,
-                            self.rng, self.fading)[0]
+        # the TRUE channel (= the nominal one when the mismatch is off); the radio layer below allocates with these
+        # true gains (a base station measures its channels), only the planners' placement uses the nominal model
+        g = self.gains(ux, uy, np.array([self.x]), np.array([self.y]), np.array([self.h]), "true", self.rng,
+                       self.fading)[0]
         rate_noma, rate_oma = md.noma_rates(g, p_w, self.noise_psd, self.sc["bandwidth_hz"], self.sc["pairing"],
                                             self.rng)
         extra = {}
