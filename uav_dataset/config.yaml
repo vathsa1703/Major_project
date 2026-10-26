@@ -306,6 +306,17 @@ b6fc:
                                 # forecast time (mid-window) first, then the full window only for the K best (+ B6's
                                 # choice and 'stay'); sites_exp phase 4 sets it (SCREEN_TOP) and reports the agreement
 
+# B6dep, the departure-time planner (baselines.B6Depart; anticipation rule). With an announced event that is not over
+# yet, every K steps it scores two-leg plans "stay at B6's choice until departure d, then fly to one of the top_k
+# spots for the end of the move" (and "never leave") on one common horizon (now .. episode end) with B6fc's forecast.
+# Used by no other pilot and no default.
+b6dep:
+  top_k: 3                      # reviewer's proposal: the 3 best spots for the end of the move
+  depart_every_s: 10            # departure times now, now + 10 s, ... up to t0 + tau (the decision rhythm)
+  sample_s: 5                   # ENGINEERING CHOICE: forecast coverage every 5 s of the horizon (the oracle's grid)
+  extrap_cap_s: 60              # ENGINEERING CHOICE: velocity extrapolation used for at most 60 s ahead (= b6fc.window_s);
+                                # walkers turn inside their site, so a longer straight-line extrapolation is not a forecast
+
 # Clairvoyant oracle (book 14.6 step 3, oracle.py): how much could ANTICIPATION add over the best myopic pilot B6?
 # It knows the crowd's future and plans over B6's own candidates (grid_n x grid_n x altitude_levels_m + the start spot).
 # Decisions every baselines.replan_every_steps seconds, like B6. Measurement only: never imported by the rl_* code.
@@ -375,6 +386,23 @@ profiles:
   sites_d20_t0: {<<: *sites, sites: {distance_m: 2000, tau_s: 0}}
   sites_d20_t60: {<<: *sites, sites: {distance_m: 2000, tau_s: 60}}
   sites_d20_t180: {<<: *sites, sites: {distance_m: 2000, tau_s: 180}}
+  # Anticipation rule (pre-registered test cells, docs/prereg/anticipation_rule.md; anticip_exp.py): sites_base with
+  # ONE more thing changed each: the drone's top speed (v8 / v25 m/s), the episode length (T600: 600 s, event start
+  # range scaled x2), or an off-grid distance / ramp. Batteries are ENGINEERING CHOICES so that every pilot lasts the
+  # episode (the headroom is energy-free by design, as in D-52): 24 Wh at 25 m/s (fast flight costs more than
+  # hovering), 40 Wh for 600 s (hover alone needs ~29 Wh).
+  sites_v8_d15_t60: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 8}, sites: {distance_m: 1500, tau_s: 60}}
+  sites_v25_d15_t60: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 25}, energy: {battery_wh: 24},
+                      sites: {distance_m: 1500, tau_s: 60}}
+  sites_v8_d20_t0: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 8}, sites: {distance_m: 2000, tau_s: 0}}
+  sites_v25_d20_t0: {<<: *sites, uav: {p_max_dbm: 20, a_max_mps2: 4, v_max_mps: 25}, energy: {battery_wh: 24},
+                     sites: {distance_m: 2000, tau_s: 0}}
+  sites_T600_d20_t0: {<<: *sites, mobility: {choices: [sites], episode_steps: 600}, energy: {battery_wh: 40},
+                      sites: {distance_m: 2000, tau_s: 0, t0_range_s: [120, 300]}}
+  sites_T600_d15_t60: {<<: *sites, mobility: {choices: [sites], episode_steps: 600}, energy: {battery_wh: 40},
+                       sites: {distance_m: 1500, tau_s: 60, t0_range_s: [120, 300]}}
+  sites_d175_t30: {<<: *sites, sites: {distance_m: 1750, tau_s: 30}}
+  sites_d125_t120: {<<: *sites, sites: {distance_m: 1250, tau_s: 120}}
   # G5 training cells with the ANNOUNCED schedule (owner, D-54): the AI sees event_countdown + event_announce
   sites_d20_t0_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 0, announced: true}}
   sites_d20_t60_ann: {<<: *sites, sites: {distance_m: 2000, tau_s: 60, announced: true}}

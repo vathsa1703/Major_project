@@ -1,7 +1,8 @@
 """Baseline controllers B0-B5, plus B6 (B3 with altitude search), B7 (B6's targets, but circling at the
 minimum-power speed instead of hovering; plan step 5) and B8 (B6's targets; hovers while the battery would last
 hovering to the end, circles like B7 otherwise; D-52) and B6fc (B6 scoring its candidates on a forecast of the active
-users at the drone's arrival: velocity extrapolation, plus the announced event when there is one; D-52 phase 3).
+users at the drone's arrival: velocity extrapolation, plus the announced event when there is one; D-52 phase 3) and
+B6dep (B6 plus WHEN to leave for the announced event's destination, two-leg plans on one common horizon).
 Each one drives the SAME UAVEnv through env.step(), so comparisons are fair.
 
     policy = make_policy("B2")
@@ -562,9 +563,13 @@ class B6Forecast(B6GridAltitude):
             return s["m"]
         return min(s["m"], int(np.floor((time_s - s["t0"]) * s["m"] / s["tau"])) + 1)
 
+    def extrap_lead(self, lead):
+        """Seconds of velocity extrapolation used for a forecast `lead` seconds ahead (B6fc: all of it)."""
+        return lead
+
     def forecast(self, env, s, tt):
         """(xy, min_rate, rescue) of the forecast active users at time index tt >= now."""
-        lead = (tt - s["t"]) * env.dt
+        lead = self.extrap_lead((tt - s["t"]) * env.dt)
         xy = np.clip(s["xy"] + s["v"] * lead, 0.0, env.L) if lead > 0 else s["xy"]
         if "t0" in s:
             k = min(len(s["inA"]), self.switched(s, tt * env.dt) - self.switched(s, s["t"] * env.dt))
@@ -650,6 +655,132 @@ class B6Forecast(B6GridAltitude):
             return
         j = self.pick(env, sc, CX, CY, CH)
         self.target = (CX[j], CY[j], CH[j])
+
+
+# ---------------------------------------------------------------- B6dep: the departure-time planner (anticipation rule)
+def fly_two_legs(env, first, second, dep, n_steps):
+    """Positions (n_steps + 1, P, 3) of P planned flights from the drone's CURRENT state (position and velocity):
+    flight p flies go_to toward first[p] (x, y, h) at steps k < dep[p] and toward second[p] from step dep[p] on
+    (dep = inf: never leaves the first leg). Row k = the position k steps from now (row 0 = now). env.step's
+    kinematics (speed limits, acceleration limit, map and altitude clipping) driven by go_to's commands, braking
+    included, exactly as flight_steps; vectorised over the plans. Pure: reads only the drone's own state."""
+    u, dt, L = env.uav, env.dt, env.L
+    vmax, vzmax, a_max = u["v_max_mps"], u["vz_max_mps"], u.get("a_max_mps2")
+    first, second = np.asarray(first, dtype=float), np.asarray(second, dtype=float)
+    dep = np.asarray(dep, dtype=float)
+    n = len(dep)
+    x, y, h = np.full(n, env.x), np.full(n, env.y), np.full(n, env.h)
+    vx, vy, vz = np.full(n, env.vx), np.full(n, env.vy), np.full(n, env.vz)
+    out = np.empty((int(n_steps) + 1, n, 3))
+    for k in range(int(n_steps) + 1):
+        out[k, :, 0], out[k, :, 1], out[k, :, 2] = x, y, h
+        if k == n_steps:
+            break
+        tgt = np.where((k < dep)[:, None], first, second)
+        dx, dy, dh = tgt[:, 0] - x, tgt[:, 1] - y, tgt[:, 2] - h
+        dist = np.hypot(dx, dy)
+        if a_max is None:                                   # go_to, old model
+            cx, cy = dx / (vmax * dt), dy / (vmax * dt)
+            nrm = np.hypot(cx, cy)
+            sc = np.where(nrm > 1.0, 1.0 / np.maximum(nrm, 1e-300), 1.0)
+            cx, cy = cx * sc, cy * sc
+            cz = np.clip(dh / (vzmax * dt), -1.0, 1.0)
+        else:                                               # go_to with braking
+            s = np.minimum(np.minimum(vmax, dist / dt), brake_speed(dist, a_max, dt))
+            safe = np.where(dist > 0, dist, 1.0)
+            cx, cy = np.where(dist > 0, dx / safe * s / vmax, 0.0), np.where(dist > 0, dy / safe * s / vmax, 0.0)
+            sz = np.minimum(np.minimum(vzmax, np.abs(dh) / dt), brake_speed(np.abs(dh), u["az_max_mps2"], dt))
+            cz = np.sign(dh) * sz / vzmax
+        cx, cy, cz = np.clip(cx, -1, 1), np.clip(cy, -1, 1), np.clip(cz, -1, 1)          # env.step from here
+        hx, hy = cx * vmax, cy * vmax
+        nrm = np.hypot(hx, hy)
+        sc = np.where(nrm > vmax, vmax / np.maximum(nrm, 1e-300), 1.0)
+        hx, hy, hz = hx * sc, hy * sc, cz * vzmax
+        if a_max is not None:
+            ddx, ddy = hx - vx, hy - vy
+            nrm = np.hypot(ddx, ddy)
+            sc = np.where(nrm > a_max * dt, a_max * dt / np.maximum(nrm, 1e-300), 1.0)
+            hx, hy = vx + ddx * sc, vy + ddy * sc
+            az = u["az_max_mps2"] * dt
+            hz = vz + np.clip(hz - vz, -az, az)
+        nx, ny = np.clip(x + hx * dt, 0, L), np.clip(y + hy * dt, 0, L)
+        nh = np.clip(h + hz * dt, u["h_min_m"], u["h_max_m"])
+        vx, vy, vz = (nx - x) / dt, (ny - y) / dt, (nh - h) / dt
+        x, y, h = nx, ny, nh
+    return out
+
+
+class B6Depart(B6Forecast):
+    """B6dep (anticipation rule; reviewer's proposal after D-52 phase 4): B6 that also decides WHEN to leave for
+    where the announced event will put the demand. B6fc scores every candidate over its own window after its own
+    arrival, so far spots look good too early and it leaves too soon; B6dep scores whole two-leg plans on ONE common
+    horizon instead. Every K steps, while an announced move has not finished (now < t0 + tau):
+      S = B6's own choice now (the 'stay' leg);
+      post spots = the top_k of B6's candidates by forecast coverage at the end of the move (time t0 + tau, the
+                   B6fc forecast: the announced schedule plus velocity extrapolation, capped at extrap_cap_s);
+      plans = 'never leave' (fly to / hover at S to the end) plus, for every departure time d in now, now + 10 s,
+              ... up to t0 + tau and every post spot P: fly to S until d, then to P (go_to with braking; positions
+              from fly_two_legs, i.e. the env's own kinematics);
+      score = mean forecast coverage at the plan's position over the common horizon now, now + sample_s, ... < T.
+    It flies to P if the best plan leaves NOW, otherwise it does what B6 does (the stay leg). Ties (1e-12): 'never
+    leave' (B6) first, then the latest departure, then the better post spot.
+    Information: exactly B6fc's (the drone's own state, the users active now and their last-frame velocities, and the
+    announcement: t0, tau, share, sites A/B centres and radii). It never reads a future position, mask or the true
+    movers. Unannounced, no event, or after t0 + tau: exactly B6 (test). It does not read the battery."""
+    name = "B6dep"
+
+    def reset(self, env):
+        super().reset(env)
+        c = md.CFG["b6dep"]
+        self.top_k, self.dep_every = int(c["top_k"]), int(c["depart_every_s"])
+        self.dep_sample, self.cap = int(c["sample_s"]), c["extrap_cap_s"]
+
+    def extrap_lead(self, lead):
+        return lead if self.cap is None else min(lead, float(self.cap))
+
+    def plan(self, env):
+        B6GridAltitude.plan(self, env)                     # B6's own choice: the stay leg (and B6 itself)
+        if not self.announced(env):
+            return
+        sc, now = env.sc, env.t
+        t_end = float(sc["event_t0_s"]) + float(sc["tau_s"])           # the announced move is over by then (s)
+        if now * env.dt >= t_end:
+            return
+        S = np.array(self.target, dtype=float)
+        s = self.snapshot(env)
+        p_w = env.p_max_w * self.power
+        CX, CY, CH = self.candidates(env)
+        t_post = min(int(np.ceil(t_end / env.dt)), env.T - 1)
+        post = self.evaluate_forecast(env, s, t_post, np.column_stack([CX, CY, CH]), p_w)
+        top = np.argsort(-post, kind="stable")[: self.top_k]
+        P = np.column_stack([CX[top], CY[top], CH[top]])
+        step = int(round(self.dep_every / env.dt))
+        deps = np.arange(0, int(np.floor(t_end / env.dt)) - now + 1, step)            # steps from now
+        deps = deps[now + deps < env.T]
+        # plan 0 = never leave; then (d, rank) d-major
+        dep = np.concatenate([[np.inf], np.repeat(deps, len(top)).astype(float)])
+        second = np.vstack([S[None], np.tile(P, (len(deps), 1))])
+        rank = np.concatenate([[-1], np.tile(np.arange(len(top)), len(deps))])
+        horizon = env.T - now
+        pos = fly_two_legs(env, np.tile(S, (len(dep), 1)), second, dep, horizon - 1)
+        ks = np.arange(0, horizon, int(round(self.dep_sample / env.dt)))
+        score = np.zeros(len(dep))
+        for k in ks:
+            uniq, inv = np.unique(np.round(pos[k], 6), axis=0, return_inverse=True)
+            cov = self.evaluate_forecast(env, s, now + int(k), uniq, p_w)
+            score += cov[inv.ravel()]
+        score /= len(ks)
+        best = np.flatnonzero(score >= score.max() - 1e-12)
+        if best[0] == 0:                                   # 'never leave' among the best: B6
+            return
+        j = best[np.lexsort((rank[best], -dep[best]))[0]]  # latest departure, then the better post spot
+        if dep[j] == 0:
+            self.target = tuple(float(v) for v in second[j])
+
+    def evaluate_forecast(self, env, s, tt, nodes, p_w):
+        """Forecast coverage at time index tt of the drone at each row (x, y, h) of nodes."""
+        xy, mr, rs = self.forecast(env, s, tt)
+        return env.evaluate_users(xy, mr, rs, nodes[:, 0], nodes[:, 1], nodes[:, 2], p_w, tt)
 
 
 class B4PSO(Policy):
@@ -850,7 +981,7 @@ class B3Reports(_Reports, B3GridSearch):
 
 
 POLICIES = {"B0": B0Fixed, "B1": B1FollowCrowd, "B2": B2KMeans, "B3": B3GridSearch, "B4": B4PSO, "B5": B5EnergyAware,
-            "B6": B6GridAltitude, "B7": B7Loiter, "B8": B8BatteryAware, "B6fc": B6Forecast,
+            "B6": B6GridAltitude, "B7": B7Loiter, "B8": B8BatteryAware, "B6fc": B6Forecast, "B6dep": B6Depart,
             "B3obs": B3Obs, "B3obsU": B3ObsUncapped, "B3obsUO": B3ObsUncappedObstacles,
             "B3obsN": B3ObsN, "B3obsUN": B3ObsUncappedN}
 # Parametrised pilots, NOT in POLICIES (so no default run list changes). Name them as "B6rep:f=0.2,sigma=10,age=30".
