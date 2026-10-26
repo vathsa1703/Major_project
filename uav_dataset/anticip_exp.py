@@ -36,7 +36,8 @@ OLD_CELLS = list(sites_exp.CELLS)                     # the 9 D-52 cells (fit se
 OLD_SEEDS = list(range(1000, 1020))                   # their fresh seeds (D-52 phase 4)
 NEW_CELLS = ["sites_v8_d15_t60", "sites_v25_d15_t60", "sites_v8_d20_t0", "sites_v25_d20_t0",
              "sites_T600_d20_t0", "sites_T600_d15_t60", "sites_d175_t30", "sites_d125_t120"]   # test set (prereg)
-NEW_SEEDS = list(range(2000, 2012))                   # fresh, disjoint from every earlier seed set (12: owner, before any run)
+NEW_SEEDS = list(range(2000, 2012))                   # fresh, disjoint from every earlier seed set
+                                                      # (12: owner, before any run)
 FOOT_SEEDS = list(range(20))                          # design seeds: rho is a property of the physics, not an outcome
 DECISION_S = 10.0                                     # the decision period (baselines.replan_every_steps x dt)
 PASS_MARK = sites_exp.PASS_MARK                       # 0.02
@@ -323,8 +324,8 @@ def fit_k(A, M, h):
 
 
 def fit_loglin(A, M, h):
-    """Candidate 'loglin': log h = a + b log A + c M (ordinary least squares on log max(h, H_FLOOR)); h = e^a A^b e^(cM).
-    Monotone (increasing) only if b >= 0 and c >= 0."""
+    """Candidate 'loglin': log h = a + b log A + c M (ordinary least squares on log max(h, H_FLOOR));
+    h = e^a A^b e^(cM). Monotone (increasing) only if b >= 0 and c >= 0."""
     X = np.column_stack([np.ones(len(A)), np.log(A), M])
     coef, *_ = np.linalg.lstsq(X, np.log(np.maximum(h, H_FLOOR)), rcond=None)
     return [float(v) for v in coef]
@@ -446,7 +447,8 @@ def fit(confirm_csv):
                b6_rerun_max_abs_diff=diff, rho=rho, fit_cells=t.to_dict(orient="records"),
                predictions=new.to_dict(orient="records"))
     (OUT / "fit.json").write_text(json.dumps(res, indent=1, default=float), encoding="utf-8")
-    L = [f"chosen model: {chosen} (lowest leave-one-out RMSE among the selectable monotone candidates {SELECTABLE}), params "
+    L = [f"chosen model: {chosen} (lowest leave-one-out RMSE among the selectable monotone candidates "
+         f"{SELECTABLE}), params "
          f"{cand[chosen]['params']}; fit R^2 on the 9 cells = {res['r2_fit']:.3f}; B6 re-run vs phase-4 file: max "
          f"|diff| = {diff:.2e}", "", "| candidate | params | monotone | LOO RMSE | fit R^2 |", "|---|---|---|---|---|"]
     L += [f"| {n} | {', '.join(f'{v:.4g}' for v in c['params'])} | {c['monotone']} | {c['loo_rmse']:.4f} | "
