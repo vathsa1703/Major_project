@@ -1,5 +1,8 @@
 <!-- DRAFT of the final major-project report. Source of every number: the project book docs/book/ (chapter.section in the
 HTML comment next to it). Items not yet in the book are marked "NOT IN BOOK" in the comment, with the file they come from.
+Updated 2026-10-26 with the five finished studies: value of information (origin/contrib/value-of-info), anticipation rule
+(origin/contrib/anticipation), hybrid timing AI (origin/rl/hybrid-timing), model mismatch (origin/exp/model-mismatch) and the
+Kathmandu case (docs/case_nepal on main). The four study branches were not yet merged into main on that date.
 Anything unfinished is marked [PENDING: ...]. Build the PDF with: python docs/report/build_report.py -->
 
 <!-- titlepage -->
@@ -80,18 +83,25 @@ service for a while, but where it should fly, how high, and how it should share 
 built an open, tested, simulation-based planning tool for this problem: moving survivor crowds with five service classes,
 collapsed buildings, the Al-Hourani air-to-ground channel, the Zeng-Xu-Zhang rotary-wing energy model with a battery, and a
 NOMA downlink in which two users share one frequency slice. Every strategy flies the same seeded scenarios and is compared
-with paired 95% confidence intervals. Results: a drone that follows the crowd serves 74 of every 100 people where a parked drone
-serves 43; when NOMA and OMA are optimised in the same way, adaptive NOMA serves 3 to 5 more people per 100 for every pilot;
-circling at the minimum-power speed serves about 26% more people per battery than hovering. A reinforcement-learning pilot that
-sees only what a real drone could measure did not reach its first gate (0.576 against a pass mark of 0.580). A "clairvoyant"
-pilot that knows the crowd's future showed why: in walking-crowd scenarios there is almost no room for anticipation (+0.002).
-In redesigned scenarios with demand switching between sites 2 km apart there is room, but the first round of learning agents
-still scored 0.073 to 0.137 below the best simple pilots, so the next step is a hybrid in which the AI only decides when to
-leave. A simulated quadcopter with an autopilot flew the same plans within
-0.012 coverage of the simplified game. We report where learning helps, where it does not, and what remains open.
-<!-- src: H1 0.741 vs 0.428 book 7.8 (rounded 74/43 as in docs/summary); NOMA +0.03..+0.05 book 13.9; +25.6% book 7.10;
-G4 0.576 vs 0.580 book 8.8; clairvoyant +0.002 book 7.11; G5 round 1 book 8.9 (per-agent range -0.073..-0.137 from
-results/g5 summaries); sim-to-sim -0.003..-0.012 book 4.9 -->
+with paired 95% confidence intervals, with pass marks written down before the results. Results: a drone that follows the
+crowd serves 74 of every 100 people where a parked drone serves 43; when NOMA and OMA are optimised in the same way, adaptive
+NOMA serves 3 to 5 more people per 100 for every pilot, and about 13 more for the best pilot in a scenario based on the 2024
+Kathmandu floods with real OpenStreetMap buildings; circling at the minimum-power speed serves about 26% more people per
+battery than hovering. A planner keeps 98% of its coverage when only half of the phones report a GPS position (one in twenty on
+competing sites), even with 50 m error. A "clairvoyant" pilot that knows the future measures, before any training, whether an
+AI has room to win at all: on walking crowds there is almost none (+0.002); room exists only where demand jumps between sites
+about 2 km apart. A rule meant to predict that room from distance, speed and timing was not confirmed on new designs. The
+learning pilots did not beat the best simple pilot anywhere: not on still crowds (0.576 against a pass mark of 0.580), not on
+competing sites (best 0.680 against 0.756), not as a hybrid that only decides when to leave (-0.004 and -0.019), and not when
+the true radio channel differs from the textbook model (-0.039 to -0.101). A simulated quadcopter with an autopilot flew the
+same plans within 0.012 coverage of the simplified game. The result is an honest map of where learning helps and where a
+computed rule is enough.
+<!-- src: H1 0.741 vs 0.428 book 7.8 (rounded 74/43 as in docs/summary); NOMA +0.03..+0.05 book 13.9; Kathmandu B6 +0.127
+docs/case_nepal/results.md; +25.6% book 7.10; value of information origin/contrib/value-of-info
+docs/prereg/value_of_info_results.md; G4 0.576 vs 0.580 book 8.8; clairvoyant +0.002 book 7.11; anticipation rule
+origin/contrib/anticipation docs/prereg/anticipation/results_summary.md; G5 round 1 book 8.9; hybrid
+origin/rl/hybrid-timing uav_dataset/results/hybrid/summary.md; mismatch origin/exp/model-mismatch
+docs/prereg/model_mismatch_results.md; sim-to-sim -0.003..-0.012 book 4.9 -->
 
 **Keywords:** UAV base station, NOMA, disaster communication, air-to-ground channel, rotary-wing energy, reinforcement
 learning, baselines, simulation-based planning.
@@ -120,7 +130,11 @@ learning, baselines, simulation-based planning.
 | 5.11 | Best AI (E0) vs grid search on validation scenario 105 | 5.6 |
 | 5.12 | Circling vs hovering | 5.4 |
 | 5.13 | Room for a pilot that thinks ahead, fresh scenarios | 5.7 |
-| 5.14 | The 3D flight page (simulated quadcopter) | 5.9 |
+| 5.14 | The anticipation rule: fit and test | 5.7 |
+| 5.15 | The 3D flight page (simulated quadcopter) | 5.10 |
+| 5.16 | How many phones must report their position | 5.11 |
+| 5.17 | The Kathmandu scenario: buildings, river, flood band and people | 5.12 |
+| 5.18 | NOMA vs OMA, Kathmandu and synthetic `hard` | 5.12 |
 
 # List of tables
 
@@ -142,10 +156,18 @@ learning, baselines, simulation-based planning.
 | 5.7 | Clairvoyant headroom on walking crowds | 5.7 |
 | 5.8 | Room in the competing-sites designs | 5.7 |
 | 5.9 | Room confirmed on fresh scenarios | 5.7 |
-| 5.10 | G5 round 1 | 5.8 |
-| 5.11 | Sim-to-sim check | 5.9 |
+| 5.10 | The anticipation rule on 8 new designs | 5.7 |
+| 5.11 | G5 round 1 | 5.8 |
+| 5.12 | Hybrid timing AI | 5.8 |
+| 5.13 | The AI's shortfall split into parts | 5.8 |
+| 5.14 | Model mismatch: room test | 5.9 |
+| 5.15 | Model mismatch: the AI against the bar | 5.9 |
+| 5.16 | Sim-to-sim check | 5.10 |
+| 5.17 | Value of location information | 5.11 |
+| 5.18 | Kathmandu case: pilots, NOMA and OMA | 5.12 |
 | 6.1 | Where each tool fits | 6.1 |
 | 7.1 | Hypotheses: verdicts | 7.1 |
+| 7.2 | Path to real deployment (find-and-serve) | 7.3 |
 
 <!-- pagebreak -->
 
@@ -187,7 +209,15 @@ time so that as many survivors as possible stay connected before the battery run
 6. Check that the simplified flight model does not distort the conclusions, by flying the same plans with a simulated
    quadcopter and autopilot.
 7. Provide a dashboard so that non-specialists can set up a disaster, fly any pilot and compare them.
-<!-- src: book 1.3, 1.6, roadmap stages 1-5 -->
+8. Measure how much phone position information a planner needs, and test whether learning helps when the real radio
+   channel differs from the textbook model.
+9. Run the pilots on a scenario based on a real place (real buildings, reconstructed people) to check that the conclusions
+   survive real geometry.
+<!-- src: book 1.3, 1.6, roadmap stages 1-5; items 8-9 added by D-56 and the studies of 23-24 Oct 2026 -->
+
+**Wording rule.** "Simulation-based planning tool", never "digital twin": the project has no live state synchronisation and no
+replayed real traces. A scenario built on a real map is called "a scenario based on ..." and its people are never called real
+data.
 
 ## 1.4 Hypotheses
 Every experiment serves one of these hypotheses.
@@ -205,20 +235,24 @@ Every experiment serves one of these hypotheses.
 ## 1.5 Scope
 **In scope:** one UAV; 2 x 2 km and 1 x 1 km areas; 100-1,000 users in 2-5 crowds; six crowd-movement models and
 competing-site events; collapsed buildings as 2D rectangles; the Al-Hourani mean path loss with optional fading; the
-Zeng-Xu-Zhang energy model with a battery; NOMA (fixed and adaptive) and OMA downlinks; ten non-learning pilots, PPO and SAC
-agents; a clairvoyant planner; a simulated quadcopter with an autopilot; a Streamlit dashboard.
-<!-- src: book 4.1-4.7, 7.1 (B0-B8 + B6fc), 8.8, 7.11; quadcopter: book 4.9 -->
+Zeng-Xu-Zhang energy model with a battery; NOMA (fixed and adaptive) and OMA downlinks; non-learning pilots (B0-B8, B6fc,
+B6dep and diagnostic variants), PPO and SAC agents, a hybrid timing agent; a clairvoyant planner; a simulated quadcopter with an
+autopilot; a Streamlit dashboard; one case study on real building footprints (a 2 x 2 km area of Kathmandu from
+OpenStreetMap, with a height-aware line-of-sight test), with the people reconstructed from assumptions.
+<!-- src: book 4.1-4.7, 7.1 (B0-B8 + B6fc), 8.8, 7.11; quadcopter: book 4.9; B6dep: anticipation prereg; Kathmandu:
+docs/case_nepal/README.md -->
 
-**Out of scope:** real hardware and flight tests; building heights, terrain and real maps (a real place from OpenStreetMap
-is planned only as a demonstration); the drone's own backhaul; interference from other cells; bit-error rate; more than one
-drone (H4 was not attempted). All results are conditional on the model: they may be used to compare strategies under the stated
-assumptions, not to predict absolute coverage in a real disaster.
+**Out of scope:** real hardware and flight tests; terrain, and building heights outside the one real-map case; the drone's
+own backhaul; interference from other cells; bit-error rate; locating survivors from their phones (future work, Section 7.3);
+more than one drone (H4 was not attempted). All results are conditional on the model: they may be used to compare strategies
+under the stated assumptions, not to predict absolute coverage in a real disaster.
 <!-- src: book 4.9, 10.5 -->
 
 ## 1.6 Organisation of the report
 Chapter 2 surveys the literature by theme. Chapter 3 describes the system design. Chapter 4 covers the implementation, testing
-and reproducibility. Chapter 5 presents the results, hypothesis by hypothesis. Chapter 6 discusses where learning helps,
-the limitations and threats to validity. Chapter 7 concludes and lists future work.
+and reproducibility. Chapter 5 presents the results, hypothesis by hypothesis, then the studies of location information and
+the Kathmandu case. Chapter 6 discusses where learning helps, the limitations and threats to validity. Chapter 7 concludes,
+lists future work and describes the next study, finding survivors from their phones.
 
 <!-- pagebreak -->
 
@@ -322,12 +356,24 @@ results are seen.
 ## 2.8 Gap and positioning
 From the survey, the defensible contribution is not a new algorithm but **an open, tested simulator and evaluation protocol for
 UAV-NOMA planning in disaster scenarios, a comparison of learning against strong non-learning pilots across regimes, and an
-analysis of when learning helps**, together with specific findings: most of a search pilot's lead can come from choosing the
-altitude; forward flight costs less energy than hovering; NOMA's gain measured inside the mission for every pilot; and a method
-(clairvoyant headroom) for deciding whether a scenario leaves any room for a learning controller at all. Two further
-contributions are in progress: an anticipation rule that predicts that room from distance, speed and timing, and a design
-rule for how much phone location information a planner needs (D-56).
-<!-- src: book 11.2, D-56 -->
+analysis of when learning helps**, together with specific findings:
+1. **H1:** an adaptive drone beats a parked one where the area is large and power scarce (0.741 vs 0.428), and most of a search
+   pilot's lead can come from choosing the altitude.
+2. **H3:** NOMA's gain measured inside the mission for every pilot, against an equally optimised OMA (+0.03 to +0.05), and
+   about twice as large for the best pilot on real building geometry (Kathmandu case, +0.127).
+3. **Energy:** circling at the minimum-power speed serves about 26% more people per battery than hovering.
+4. **Clairvoyant headroom:** a method for deciding, before any training, whether a scenario leaves any room for a learning
+   controller at all.
+5. **Value of location information:** a design rule for how many phones must report their position, how accurately and how
+   often (pre-registered, passed).
+6. **Sim-to-sim:** the coverage conclusions survive a realistic quadcopter with an autopilot and wind.
+7. **An honest map of where AI does and does not help**, including four pre-registered negative results and one rule that was
+   not confirmed (the anticipation rule).
+<!-- src: book 11.2, D-56; new results from the branches named in Chapter 5 -->
+
+Drone systems that locate phones from the air for search and rescue have been described in a paper and in industry reports
+([33], [35]; both still to be verified against the originals). Our project does not locate phones; it plans a drone that serves
+them. Joining the two ("find-and-serve") is the next study (Section 7.3).
 
 <!-- pagebreak -->
 
@@ -372,7 +418,11 @@ the RL agents later trained on fresh seeds 10,000-19,999. Named profiles change 
 | `hard` | 2 x 2 km, 20 dBm, 3-8 buildings of 60-200 m, only hotspot jump / surge / group drift / attraction, 16 Wh |
 | `rl_static` | as `hard` but the crowd stands still (RL curriculum step 1) |
 | `sites_d{10,15,20}_t{0,60,180}` | 2-3 sites 1.0-2.0 km apart; 50-70% of the demand switches from site A to B at 60-150 s, at once or over 1 or 3 minutes; G5 settings inside |
-<!-- src: book 4.1, 7.12, D-52 -->
+| `sites_v*`, `sites_T600_*`, `sites_d175_t30`, `sites_d125_t120` | Eight new competing-sites designs for testing the anticipation rule: drone top speed 8 or 25 m/s, a 600 s mission, or new distances and switch times |
+| `mm_*` | `rl_static` with G5 settings, and a TRUE radio world that differs from the planners' textbook model: correlated shadowing, a 25 dB building loss (planners assume 15 dB) and buildings missing from the planners' map |
+| `place_kathmandu_bagmati` | A 2 x 2 km area of Kathmandu along the Bagmati river: 12,061 real building footprints from OpenStreetMap, height-aware line of sight, a reconstructed flood crowd that does not walk, an evacuation event; 20 dBm, 16 Wh, G5 settings |
+<!-- src: book 4.1, 7.12, D-52; anticipation prereg (origin/contrib/anticipation docs/prereg/anticipation_rule.md);
+mismatch prereg (origin/exp/model-mismatch docs/prereg/model_mismatch.md); docs/case_nepal/README.md -->
 
 Every person belongs to a class that sets the minimum rate needed to count as served.
 
@@ -410,6 +460,13 @@ noise  = -174 dBm/Hz + 7 dB noise figure, over each user's bandwidth
 Optional fading (Rician K = 10 dB for LoS, Rayleigh for NLoS) is off for the dataset and the baselines. Bandwidth scales with
 the crowd: 50 kHz per user.
 <!-- src: book 4.5, D-03 -->
+
+**On a real map (Kathmandu case only).** Al-Hourani's P_LoS is a statistical stand-in for buildings whose positions are
+unknown. Where the buildings are known, the simulator instead draws the straight 3D line from each phone (1.5 m above the
+ground or the roof it stands on) to the drone over a 2 m height grid of the footprints: a clear ray gets FSPL + 1 dB, a ray
+that passes below a roof gets FSPL + 20 dB (the same two Al-Hourani terms). Using both P_LoS and the known buildings would
+count the buildings twice; that variant is kept as a sensitivity run. No diffraction, trees, terrain or indoor users.
+<!-- src: docs/case_nepal/README.md section 3 -->
 
 *Figure 3.2 One second of the game*
 
@@ -497,10 +554,16 @@ The baselines see the true user positions (privileged information); the AI sees 
 | B7 | Circling | Chooses spots like B6 but circles them (50 m) at the minimum-power speed |
 | B8 | Battery rule | Like B6; circles once the battery would not last |
 | B6fc | Forecasting | Like B6, also using the announced event schedule (competing sites) |
+| B6dep | Departure time | B6 plus *when* to leave for the announced site: every 10 s it compares "stay until time d, then fly" for every d, with B6fc's forecast |
+| B6rep, B3rep | Phone reports | B6's / B3's search on positions reported by a share of the phones, with GPS error and age (value of information) |
+| B6meas | Measure and search | Textbook model to pick a few spots, then flies there, measures its real coverage and searches locally (model mismatch) |
+| B6true | Upper bound (mismatch) | B6 with a finer search on the TRUE channel; not a competitor |
 | B3obs, B3obsU, B3obsUO | Information ladder | B3's search using only the AI's maps (diagnostic) |
 | Clairvoyant | Upper bound | Knows the crowd's whole future; dynamic programming over B6's grid |
 | AI | PPO / SAC | Neural network trained by RL; sees only raw measurements |
-<!-- src: book 7.1, 7.11, D-52, D-37 -->
+| Hybrid | B6 + PPO | B6 decides where; a small PPO policy decides only when to leave for the announced site (disclosed as a hybrid) |
+<!-- src: book 7.1, 7.11, D-52, D-37; B6dep: anticipation_rule.md section 2; B6rep: value_of_info.md section 2; B6meas,
+B6true: model_mismatch.md section 4; hybrid: hybrid_timing.md section 2 -->
 
 *Figure 3.3 How each pilot reaches the game*
 
@@ -598,15 +661,26 @@ documents. Development on Windows 11 (laptop CPU); continuous integration on Git
 | `quadsim.py`, `sim2sim_exp.py`, `viewer3d.html` | Simulated quadcopter, sim-to-sim check, 3D view |
 | `dashboard.py`, `dashboard_core.py` | Streamlit dashboard and its tested logic |
 | `view_run.py`, `compare_run.py` | Single-pilot GIFs and multi-pilot comparison pictures |
+| `osm_place.py`, `place.py`, `nepal_case.py` | Real-map case: OpenStreetMap import, height grid and 3D line of sight, Kathmandu runs |
+| `voi_exp.py` | Value of location information (study branch) |
+| `anticip_exp.py`, `anticip_report.py` | Anticipation rule (study branch) |
+| `hybrid.py`, `hybrid_tables.py`, `hybrid_train.py`, `hybrid_eval.py` | Hybrid timing AI (study branch) |
+| `mismatch_exp.py`, `mismatch_eval.py` | Model mismatch (study branch) |
 | `test_*.py` | Automated tests |
-<!-- src: book 9.1; later files from the tree of branch final/integrate -->
+<!-- src: book 9.1; later files from the tree of branch final/integrate; real-map files on main; "study branch" = on
+origin/contrib/value-of-info, origin/contrib/anticipation, origin/rl/hybrid-timing, origin/exp/model-mismatch, not yet
+merged into main on 2026-10-26 -->
 
 ## 4.3 Testing and continuous integration
 - **399 automated tests** (2026-10-23), covering the NOMA maths (including brute force on small crowds
   and an independent re-derivation of the closed form, exact to 1e-15 over 2,000 random pairs), the mobility models, the
   obstacle geometry, the energy model, the Gymnasium checker, every pilot, the statistics, the clairvoyant planner (equal to
   brute force on a small grid), the privileged-critic guard (the flying network's output is bit-identical when only the
-  privileged data changes), the dashboard logic and the quadcopter (26 tests).
+  privileged data changes), the dashboard logic and the quadcopter (26 tests). The later studies add their own test files
+  (`test_place.py` on main; `test_voi.py`, `test_anticip.py`, `test_b6dep.py`, `test_hybrid.py`, `test_mismatch.py` on their
+  branches), for example: the report-based planner with full information equals B6 action for action, the 3D ray test equals
+  brute force, and the hybrid pilot that never leaves reproduces B6 exactly. [PENDING: total test count after the study
+  branches are merged.]
 - Every pull request runs ruff lint, pytest on Python 3.11 and 3.12 with an 80% coverage gate on the core modules, a smoke run
   of the generator, and a separate RL job with a short PPO training.
 - `main` is protected: pull requests, green CI and code-owner review.
@@ -889,14 +963,45 @@ the 1.5 km designs below 0.02 on 4 scenarios, leaving **the 2 km designs as the 
 +0.09)**; these became the G5 training cells.
 <!-- src: book 7.13, D-55 -->
 
-**In progress (expected 24-25 Oct 2026): the anticipation rule.** *Not a result yet.* What is being done: one number built from
-the distance between sites, the drone's speed, the switch duration and the mission length, intended to predict when
-anticipation (and so any AI) can beat greedy re-planning, together with the departure-time pilot and a three-part breakdown of
-any AI's shortfall (foresight, information, learning). How it will be judged (pre-registered, D-56): the rule is fitted on the
-9 designs above, and its predictions for 8 new designs are written down before those designs are run. What would confirm it:
-the predicted "room / no room" verdicts match the measured clairvoyant room on the new designs. What would refute it: the
-predictions miss on the new designs. A quick search found no published equivalent; this still has to be checked in the
-literature review.
+**The anticipation rule (pre-registered; not confirmed).** *Plain words.* Can we predict the room without running the
+clairvoyant pilot, from four numbers anyone can look up: the distance between the sites, the drone's top speed, how long the
+switch takes and how long the mission is? The idea: a drone that thinks ahead only gains when it must spend real time flying
+*between* the two places where people need it, covering neither, and when that dead time is a noticeable share of the mission.
+
+*Scientific statement.* With footprint radius rho (where coverage halves, measured: 646-703 m), transit time
+T_tr = max(0, D - 2 rho) / v_max, A = (T_tr + 10 s) / (tau + 10 s) and M = T_tr / T, the rule selected by leave-one-out error on
+the 9 designs was **h = 0.0954 M^0.48 (A / (1 + A))^0.20** (fit R^2 = 0.986). The bar now also contains **B6dep**, a hand-written
+pilot that decides when to leave for the announced site; it is the best simple pilot in all 9 fitted designs, and with it in
+the bar the room at 1.5 km falls below 0.02 (0.010-0.015); only the 2 km designs keep room (0.026-0.036). Predictions for 8 new
+designs (other drone speeds, a 600 s mission, new distances and switch times; fresh seeds 2000-2011, 12 per design) were
+committed before they were run. Pass marks: R^2 >= 0.7 and at least 7 of 8 room / no-room calls right. All designs use
+adaptive NOMA (noma_opt, SIC residual 0.05, rescue first); no OMA run was made in this study, because it asks about timing, not
+access.
+
+*Table 5.10 The anticipation rule on 8 new designs (room h = clairvoyant minus the best simple pilot, 12 scenarios each; adaptive NOMA)*
+
+| New design | Predicted h | Measured h (95% CI) | Call right? |
+|---|---|---|---|
+| top speed 8 m/s, 1.5 km, 60 s switch | 0.017 (no room) | +0.031 +/- 0.018 | no |
+| top speed 25 m/s, 1.5 km, 60 s switch | 0.009 (no room) | +0.007 +/- 0.005 | yes |
+| top speed 8 m/s, 2 km, sudden | 0.049 (room) | +0.040 +/- 0.019 | yes |
+| top speed 25 m/s, 2 km, sudden | 0.028 (room) | +0.019 +/- 0.008 | no |
+| 600 s mission, 2 km, sudden | 0.026 (room) | +0.018 +/- 0.006 | no |
+| 600 s mission, 1.5 km, 60 s switch | 0.009 (no room) | +0.010 +/- 0.005 | yes |
+| 1.75 km, 30 s switch | 0.024 (room) | +0.026 +/- 0.013 | yes |
+| 1.25 km, 120 s switch | 0.000 (no room) | +0.005 +/- 0.004 | yes |
+<!-- src: origin/contrib/anticipation docs/prereg/anticipation/results_summary.md (all 17 cells table); fit.md;
+anticipation_rule.md sections 2-6. NOT IN BOOK. -->
+
+**Verdict: rule NOT confirmed.** R^2 = 0.576 (pass 0.7) and 5 of 8 calls right (pass 7). The predictions follow the right
+trend (correlation 0.86), and the measured room still grows with the dead-transit share M, but the rule misses designs near the
+0.02 line: it under-predicts the slow drone (8 m/s at 1.5 km) and over-predicts the fast drone and the long mission. A post-hoc
+check (not pre-registered) with a smaller footprint in the transit time got all 8 calls right but a far worse R^2 (below zero);
+it is exploratory and does not change the verdict. **What stands:** the
+clairvoyant test itself, which has to be run per design; the shortcut formula does not replace it.
+
+Figure 5.14: [The anticipation rule: room against the transit ratio A and the dead-transit share M, and predicted against measured room (blue: 9 fitted designs; orange: 8 new designs)](figures/anticipation_rule.png)
+<!-- src: origin/contrib/anticipation docs/prereg/anticipation_rule.png -->
 <!-- src: D-56 -->
 
 ## 5.8 RL on competing sites: Gate G5, round 1 (negative result)
@@ -906,7 +1011,7 @@ per run (about 3.5 h each, on Kaggle), on the two 2 km announced cells. The bar 
 All runs use adaptive NOMA (eps 0.05, rescue first) and the acceleration limit; each agent was also evaluated with optimised OMA.
 <!-- src: book 8.9, D-55 -->
 
-*Table 5.10 G5 round 1 (validation, 20 scenarios; `*` = CI excludes 0)*
+*Table 5.11 G5 round 1 (validation, 20 scenarios; `*` = CI excludes 0)*
 
 | Cell (bar) | Agent | Coverage (NOMA) | Agent minus bar | Coverage with OMA | NOMA minus OMA |
 |---|---|---|---|---|---|
@@ -933,21 +1038,107 @@ does not reach it with this budget; it does not even react as well as the search
 when to leave for the other site**. Round 2 of the full AI (5 more seeds) was therefore dropped as uninformative (D-56).
 <!-- src: book 8.9, D-56 -->
 
-**In progress (expected 24-25 Oct 2026): the hybrid timing AI.** *Not a result yet.* What is being done: a hybrid in which the
-search pilot B6 decides *where* (position and altitude) and the AI learns only *when* to leave for the announced site, the one
-decision where the room is; it is disclosed as a hybrid (D-56). How it will be judged: on the same two 2 km cells, against the
-same pre-registered bar (best of B6, B7, B8, B6fc per scenario, D-55), with paired confidence intervals on the 20 validation
-scenarios and NOMA vs OMA reported for the agent. What would confirm H2 in this regime: the hybrid beats the bar significantly
-in at least one cell, and does not beat B6 on a no-room cell (negative control). What would refute it: it stays at or below the
-bar, as the full AI did.
-<!-- src: D-55, D-56 -->
+**The hybrid timing AI (pre-registered; negative result).** *Plain words.* Since the room is about one decision, we gave the
+AI only that decision: the search pilot B6 decides *where* the drone goes (position and altitude), and a small PPO policy
+decides every 10 s only "follow B6" or "leave now for the announced site". It is a hybrid and is reported as one (D-56).
 
-## 5.9 Sim-to-sim: does the simplified flight model change the results?
+*Design.* Same two 2 km announced cells, same bar as round 1 (per scenario, the best of B6, B7, B8, B6fc), 3 PPO training seeds
+per cell, 100,000 decisions each on 200 fresh training scenarios (Kaggle), the final model of every run evaluated on the 20
+validation scenarios, no model selection. Pass mark: in at least one cell the 3-seed mean beats the bar with a Holm-corrected
+p < 0.05. A check confirmed that the hybrid that never leaves reproduces B6 exactly on all 40 scenarios. Adaptive NOMA
+(eps 0.05, rescue first), and every agent also flown with optimised OMA.
+
+*Table 5.12 Hybrid timing AI (validation, 20 scenarios per cell; 3-seed mean; `*` = CI excludes 0)*
+
+| Cell | Bar | Clairvoyant | Hybrid (NOMA) | Hybrid minus bar | Hybrid minus B6 | Hybrid with OMA | NOMA minus OMA |
+|---|---|---|---|---|---|---|---|
+| 2 km, sudden switch | 0.756 | 0.805 | 0.752 | -0.004 +/- 0.013 (Holm p = 0.57) | +0.041 +/- 0.013* | 0.620 | +0.132 +/- 0.034* |
+| 2 km, switch over 60 s | 0.753 | 0.798 | 0.734 | -0.019 +/- 0.011* (Holm p = 0.001) | +0.014 +/- 0.007* | 0.606 | +0.128 +/- 0.031* |
+<!-- src: origin/rl/hybrid-timing uav_dataset/results/hybrid/summary.md; prereg docs/prereg/hybrid_timing.md (dated
+note 2026-10-24: Round B not run; B6dep not in POLICIES at evaluation, bar = B6, B7, B8, B6fc). NOT IN BOOK. -->
+
+**Verdict: not met (0 of 2 cells).** The hybrid learned a real skill: it beats plain B6 by 0.041* and 0.014*, so it does leave
+early. But it only ties the bar on the sudden switch (the bar is mostly B6fc) and is significantly below it on the 60 s switch;
+it captures none of the clairvoyant room (-8% and -44%). Because Round A did not pass, the two extra seeds were not run, as
+pre-registered. For comparison, the hand-written departure pilot B6dep, built for the anticipation study after the hybrid's bar
+was fixed, scores 0.780 and 0.774 on the same validation scenarios, above both the bar and the hybrid. NOMA stays visible: the
+same hybrid serves 0.13 more people per scenario with adaptive NOMA than with tuned OMA.
+<!-- src: hybrid summary.md (room captured -8% / -44%); B6dep 0.780 / 0.774 from origin/contrib/anticipation
+results_summary.md gap decomposition (val seeds 100-119, announced G5 cells) -->
+
+**Where the full AI's shortfall comes from.** The anticipation study split the gap between the clairvoyant pilot and the best
+round-1 agent (goto, seed 1) into five parts, each a paired difference between two pilots on the same 20 validation scenarios.
+
+*Table 5.13 The AI's shortfall split into parts (G5 cells, validation; paired mean +/- 95% CI; adaptive NOMA)*
+
+| Part | Pilots compared | 2 km, sudden | 2 km, over 60 s |
+|---|---|---|---|
+| Foresight | clairvoyant (0.805 / 0.798) minus B6dep (0.780 / 0.774) | +0.024 +/- 0.008 | +0.023 +/- 0.008 |
+| Using the announcement | B6dep minus B6 (0.711 / 0.721) | +0.069 +/- 0.016 | +0.054 +/- 0.013 |
+| Choosing the altitude | B6 minus B3 (the AI's fixed 150 m) | +0.019 +/- 0.012 | +0.025 +/- 0.010 |
+| Information | B3 minus the same search on the AI's maps | +0.028 +/- 0.018 | +0.028 +/- 0.016 |
+| Learning | that search minus the best agent (0.680) | -0.016 +/- 0.022 | -0.012 +/- 0.019 |
+| **Total** | clairvoyant minus the best agent | **+0.125 +/- 0.019** | **+0.118 +/- 0.015** |
+<!-- src: origin/contrib/anticipation docs/prereg/anticipation/results_summary.md, "Gap decomposition on the G5 cells".
+Reported alongside the anticipation test, not part of its pass mark. NOT IN BOOK. -->
+
+In plain words: the AI is **not** a poor learner here; it matches a search that sees what it sees (the learning part is about
+zero and not significant). It loses because it was not given the altitude choice, sees only rough maps, and above all does not use the operator's
+announcement the way a hand-written departure rule does (the largest part, 0.054-0.069).
+
+## 5.9 When the textbook channel is wrong: model mismatch (negative result)
+*Plain words.* The search pilots choose spots by scoring them with the same radio model the game uses, which is an unfair
+advantage over any real drone. Here the game's TRUE radio world differs from the textbook model the pilots plan with: signal
+shadowing that is correlated over tens of metres, a 25 dB building loss where the pilots assume 15 dB, and buildings missing
+from the pilots' map. An AI that learns only from the coverage it measures might then beat pilots that trust the textbook.
+
+*Design (pre-registered).* Still crowds (`rl_static`) with the G5 settings. Room = B6true (the search on the true channel)
+minus the best of B6 and B6meas (a pilot that picks a few spots with the textbook model, then flies there and measures);
+a design has room if the room is at least 0.02 and its CI excludes 0. The AI (E0's design, with altitude control `gotoz`, 3
+training seeds x 150,000 decisions, Kaggle) must beat the bar (best of B6, B6meas, B3 per scenario) with a Holm-corrected
+p < 0.05; on the no-mismatch control it must not beat B6.
+
+*Table 5.14 Model mismatch: room test (validation, 20 scenarios; adaptive NOMA)*
+
+| Design | B6 | B6meas | B6true | Room [95% CI] |
+|---|---|---|---|---|
+| no mismatch (control) | 0.865 | 0.857 | 0.869 | +0.004 [+0.002, +0.006] |
+| shadowing 4 or 8 dB, correlation 25-150 m (6 designs) | 0.838-0.862 | 0.836-0.858 | 0.855-0.876 | +0.008 to +0.016 (none passes) |
+| building loss 25 dB | 0.836 | 0.835 | 0.852 | +0.010 [+0.005, +0.015] |
+| 2 / 4 hidden buildings | 0.846 / 0.817 | 0.844 / 0.829 | 0.860 / 0.853 | +0.010 / +0.017 (none passes) |
+| 8 hidden buildings (exploratory) | 0.752 | 0.786 | 0.829 | +0.036 [+0.023, +0.050] |
+| all errors together (exploratory) | 0.765 | 0.790 | 0.832 | +0.035 [+0.020, +0.050] |
+<!-- src: origin/exp/model-mismatch uav_dataset/results/mismatch/room.md (val seeds 100-119), rounded to 3 decimals.
+NOT IN BOOK. -->
+
+**The pre-registered grid had no room** (largest +0.017). Two larger doses were added *after* seeing that null and are labelled
+exploratory everywhere; their room was confirmed on fresh seeds 1000-1019 (+0.026 and +0.033) before any training.
+
+*Table 5.15 Model mismatch: the AI against the bar (validation, 20 scenarios, 3-seed mean; 95% CI in brackets)*
+
+| Design | Bar | AI (NOMA) | AI minus bar | AI minus B6 | NOMA minus OMA (AI) |
+|---|---|---|---|---|---|
+| 8 hidden buildings (exploratory) | 0.795 | 0.756 | -0.039 [-0.061, -0.016] | +0.004 [-0.036, +0.043] | +0.111 [+0.078, +0.143] |
+| all errors together (exploratory) | 0.801 | 0.700 | -0.101 [-0.138, -0.064] | -0.066 [-0.101, -0.030] | +0.078 [+0.053, +0.103] |
+| no mismatch (control) | 0.865 | 0.817 | -0.048 [-0.066, -0.031] | -0.048 [-0.066, -0.030] | +0.076 [+0.051, +0.100] |
+<!-- src: origin/exp/model-mismatch docs/prereg/model_mismatch_results.md. NOT IN BOOK. -->
+
+**Verdict: the AI does not beat the bar in any design**, every training seed loses, and a fresh draw of the hidden errors gives
+the same picture (-0.046 and -0.090), so it is not memorising. The control behaves as required. The one good sign: where
+the textbook is wrong (8 hidden buildings), plain B6 loses about 0.11 and the AI ties B6, so the AI is not fooled by the wrong
+model; it is still beaten by the pilot that **measures and searches** (B6meas), which recovers most of the loss (0.752 to
+0.786, ceiling 0.829). This was the outcome written down before training (the room, 0.026-0.036, is smaller than the AI's known
+learning gap of about 0.08). The useful lesson is model-based, not an AI result: **when the radio model may be wrong, measure a
+few spots and then search.** NOMA stays visible: the same agents serve 0.08 to 0.11 more people with adaptive NOMA than with
+tuned OMA.
+<!-- src: model_mismatch_results.md (checks, expectations), model_mismatch.md section 8 -->
+
+## 5.10 Sim-to-sim: does the simplified flight model change the results?
 The same pilots flew the same validation scenarios (seeds 100-104) in the point-mass game and with the simulated quadcopter and
 autopilot (Section 3.10), in calm air and in 5 m/s wind with gusts.
 <!-- src: book 4.9 -->
 
-*Table 5.11 Sim-to-sim check (5 scenarios per cell)*
+*Table 5.16 Sim-to-sim check (5 scenarios per cell)*
 
 | Cell | Game coverage | Quadcopter, calm | Quadcopter, wind | Coverage gap (calm / wind) |
 |---|---|---|---|---|
@@ -966,24 +1157,122 @@ battery results on the quadcopter need more work. Only 5 scenarios per cell, and
 ArduPilot/PX4 software-in-the-loop.
 <!-- src: book 4.9 -->
 
-Figure 5.14: [The 3D flight page: B6 flown by the simulated quadcopter in wind on a 2 km competing-sites scenario (validation seed 100), 170 s into the mission, crossing towards the newly active site (grey = people not counted now, at the other site); one scenario, for illustration only](figures/fig_3d_flight.png)
+Figure 5.15: [The 3D flight page: B6 flown by the simulated quadcopter in wind on a 2 km competing-sites scenario (validation seed 100), 170 s into the mission, crossing towards the newly active site (grey = people not counted now, at the other site); one scenario, for illustration only](figures/fig_3d_flight.png)
 <!-- src: screenshot of the dashboard's 3D page (dashboard_core.flight3d + viewer3d_html, headless Chrome), made for this report -->
 
-## 5.10 Value of location information
-**In progress (expected 24-25 Oct 2026).** *Not a result yet.* After a disaster the drone *is* the network, so phones that attach
-to it can report their position. What is being done: measuring the share, accuracy and age of phone position reports a planner
-needs to reach 98% of the coverage it gets with full information (D-56). How it will be judged: the search pilots are run with
-degraded location information (fewer phones reporting, noisier positions, older reports) on the same scenarios and compared,
-paired, with the full-information run; the still-crowd information ladder (Section 5.5) is the first data point. What would
-make it a useful design rule: a clear threshold (for example "x% of phones, y m accuracy, z s old is enough"); what would
-weaken it: coverage that falls smoothly with no usable threshold, or a threshold that depends strongly on the scenario.
-<!-- src: D-56, book 8.7 -->
+## 5.11 Value of location information (pre-registered; passed)
+*Plain words.* Every search pilot so far knew where every person stands, which no real drone does. But after a disaster the
+drone *is* the network, so a phone that attaches to it can send its GPS position. In practice only some phones do, GPS has an
+error, and reports arrive every so often. **What share of phones must report, how accurately and how often, for the planner to
+keep at least 98% of the coverage it gets with full information?**
 
-## 5.11 Real-place scenario
-**Planned, not started; date not fixed.** A scenario based on a real area (buildings and shelters from OpenStreetMap, with the
-required credit line), labelled "a scenario based on ...", with crowds reconstructed and never presented as real survivor data.
-By the owner's decision it is a demonstration and a final test of the anticipation rule, not a headline result (D-56).
-<!-- src: D-56, CLAUDE.md ideas backlog -->
+*Design (pre-registered before any main run).* B6 (and B3 as a secondary planner) searched on a *belief* built from the
+reports: a share f of the phones reports (0.05 to 1), each report has a GPS error of sigma = 0, 10 or 50 m per axis, and phones
+report every 0, 30 or 60 s (unsynchronised). The k visible reporters stand for k / f people. The drone then serves the TRUE
+people. 30 scenarios per configuration (validation seeds 100-119 and fresh seeds 1000-1009), the same for every configuration,
+1,440 episodes, all surviving the 300 s. Ratio R = coverage / full-information coverage, paired bootstrap CI. f* = the smallest
+share whose R, and that of every larger share, is at least 0.98. **Pass:** for B6, on both profiles and at both 10 m and 50 m
+error, f* is identifiable and its 95% interval stays below 1. Radio: fixed NOMA on `hard`, adaptive NOMA on the competing-sites
+cell (`sites_d20_t60_ann`, G5 settings); no OMA run was made, because the study is about information, not access.
+
+*Table 5.17 Value of location information (B6; ratio to full information [95% CI]; reports every second)*
+
+| Share of phones reporting (about how many) | `hard`, 10 m error | `hard`, 50 m error | competing sites, 10 m error | competing sites, 50 m error |
+|---|---|---|---|---|
+| 0.05 (20) | 0.957 [0.938, 0.970] | 0.958 [0.941, 0.972] | 0.983 [0.963, 1.004] | 0.987 [0.964, 1.008] |
+| 0.1 (39) | 0.973 [0.961, 0.982] | 0.972 [0.961, 0.981] | 0.986 [0.965, 1.006] | 0.990 [0.970, 1.008] |
+| 0.2 (79) | 0.978 [0.968, 0.985] | 0.979 [0.971, 0.986] | 1.004 [0.992, 1.018] | 1.003 [0.990, 1.017] |
+| 0.5 (197) | 0.990 [0.986, 0.994] | 0.988 [0.984, 0.992] | 0.998 [0.987, 1.009] | 1.001 [0.990, 1.012] |
+| 1 (393) | 1.000 [0.999, 1.001] | 0.994 [0.991, 0.997] | 1.007 [1.002, 1.011] | 1.007 [1.000, 1.015] |
+| **f\* (95% interval)** | **0.5 [0.1, 0.5]** | **0.5 [0.1, 0.5]** | **0.05 [0.05, 0.2]** | **0.05 [0.05, 0.2]** |
+| Full-information coverage | 0.770 | 0.770 | 0.717 | 0.717 |
+<!-- src: origin/contrib/value-of-info docs/prereg/value_of_info_results.md Tables 1-2; prereg docs/prereg/value_of_info.md
+(commit 68fc052). NOT IN BOOK. -->
+
+**Verdict: PASS.** What it means:
+- **GPS accuracy hardly matters** at this scale: 50 m error costs nothing measurable (B6, 20% reporting: 0.978 at 10 m vs
+  0.979 at 50 m). The planner needs to know roughly *where the crowds are and how big*, not where each person stands; its
+  search grid is 154 m wide.
+- **The share of phones matters on moving crowds** (`hard`: 5% reporting keeps 95.7%, 20% keeps 97.8%, 50% keeps 99.0%), much
+  less on competing sites, where every crowd is a dense site that even 5% of phones (about 20 reports) reveal (98.3%).
+- **Report age matters when people move away in an event:** on competing sites at 20% reporting, B6 drops from 100.4%
+  (every second) to 98.4% (every 30 s) and 97.8% (every 60 s); B3 from 98.7% to 96.3%. On `hard` the effect is small (97.8%
+  to 97.5%).
+- Ratios slightly above 1 (up to 1.007) occur because B6 is a greedy planner, not an optimal one: a perturbed picture can by
+  chance lead it to a slightly better spot. It is not "better information".
+
+**Design rule for a rescue team (within this simulator):** get position reports from about half of the attached phones,
+refreshed at least every 30 s; GPS quality down to about 50 m is enough. With one phone in five reporting expect about 2% less
+coverage on moving crowds, and with one in twenty about 4% less. The assumptions behind it are named, not verified: GPS errors
+independent per report, reporting independent of position and class (in reality older phones, dead batteries and people
+trapped indoors report less), and the share f known to the planner.
+<!-- src: value_of_info_results.md "Plain reading", notes; value_of_info.md section 6 -->
+
+Figure 5.16: [How many phones must report? Coverage relative to full information against the share of phones that report, on `hard` and on competing sites (30 scenarios, 95% CI)](figures/voi_ratio_vs_f.png)
+<!-- src: origin/contrib/value-of-info docs/prereg/value_of_info_ratio_vs_f.png -->
+
+## 5.12 A scenario based on the September 2024 Kathmandu floods
+*Plain words.* We took a real 2 x 2 km piece of Kathmandu along the Bagmati river (Teku and Kuleshwor, with Balkhu at the west
+edge and Thapathali at the east edge), downloaded every building footprint from OpenStreetMap [38] (12,061 footprints; map data
+(c) OpenStreetMap contributors, ODbL), gave each building a height, and let the same pilots serve a flood crowd there. **The
+buildings are real; the people are reconstructed** from the map with engineering assumptions (stranded on roofs within an
+assumed 200 m flood band, at shelters, on dry ground, scattered; an evacuation from roofs to shelters). It is a scenario
+*based on* the floods, not real data and not a digital twin. Riverside flooding in Balkhu and at Thapathali in late
+September 2024 is taken from news reports [39], [40]; Teku and Kuleshwor themselves were not verified as flooded from a primary source,
+and the flood band is a fixed-width strip, not the 2024 flood extent.
+<!-- src: docs/case_nepal/README.md sections 1, 2, 4, 8 -->
+
+*Design.* 20 crowd draws (seeds 0-19), pilots B0, B2, B3, B6, B7, B8, B6fc, each with adaptive NOMA and with equally optimised
+OMA (equal bandwidth and power); the same pilots and settings on the synthetic `hard` map (same seeds) for comparison. G5
+settings in both (SIC residual 0.05, rescue first, acceleration limit, 20 dBm, 16 Wh). The height-aware line of sight
+(Section 3.3) replaces the statistical one.
+
+*Table 5.18 Kathmandu case: pilots, NOMA and OMA (20 scenarios, mean +/- 95% CI; paired NOMA minus OMA; `*` = CI excludes 0)*
+
+| Pilot | Kathmandu NOMA | Kathmandu OMA | Kathmandu NOMA minus OMA | `hard` NOMA | `hard` OMA | `hard` NOMA minus OMA |
+|---|---|---|---|---|---|---|
+| B0 parked | 0.674 +/- 0.032 | 0.479 | +0.195 +/- 0.012* | 0.560 +/- 0.093 | 0.369 | +0.191 +/- 0.057* |
+| B2 k-means | 0.713 +/- 0.033 | 0.521 | +0.191 +/- 0.009* | 0.726 +/- 0.054 | 0.568 | +0.159 +/- 0.037* |
+| B3 grid | 0.741 +/- 0.032 | 0.577 | +0.164 +/- 0.010* | 0.769 +/- 0.054 | 0.633 | +0.135 +/- 0.038* |
+| B6 grid + altitude | 0.781 +/- 0.025 | 0.654 | +0.127 +/- 0.008* | 0.837 +/- 0.044 | 0.773 | +0.064 +/- 0.021* |
+| B7 circling | 0.774 +/- 0.025 | 0.626 | +0.148 +/- 0.007* | 0.833 +/- 0.045 | 0.761 | +0.072 +/- 0.021* |
+| B8 = B6fc (= B6 here) | 0.781 +/- 0.025 | 0.654 | +0.127 +/- 0.008* | 0.837 / 0.836 | 0.773 / 0.777 | +0.064* / +0.059* |
+<!-- src: docs/case_nepal/results.md (place profile and hard_g5 tables). B8 and B6fc are identical to B6 on the place profile
+(40 of 40 episodes). NOT IN BOOK. -->
+
+What the numbers say:
+- **The ranking of the pilots does not change on the real map** (B6 = B8 = B6fc > B7 > B3 > B2 > B0, with NOMA and with OMA),
+  exactly as on the synthetic map. Every gap to B6 is significant (B0 -0.107*, B2 -0.069*, B3 -0.041*, B7 -0.008*).
+- **H1 is weaker here** (B6 minus parked B0: +0.107 against +0.278 on `hard`): the river runs close to the map centre and
+  nobody walks away, so a parked drone at the centre already sees most people.
+- **H3 is stronger here: NOMA helps about twice as much on the real city for the searching pilots** (B6 +0.127 against
+  +0.064, difference +0.063 +/- 0.022*; B7 +0.148 against +0.072). For B0, B2 and B3 the gains are similar (difference not
+  significant). Our reading, not tested separately: the height-aware line of sight splits the people into clear and blocked
+  links whose channels differ by about 19 dB, and NOMA gains most when paired users have very different channels.
+- **Who gains:** with NOMA, B6 serves 0.83 of the people stranded on roofs and 0.68-0.77 of those at shelters, on dry ground and
+  scattered; with OMA the ground-level groups fall to 0.52-0.60. Rescue users are served at 0.89 with both schemes (rescue
+  first).
+- **Circling** (B7) costs 0.008 coverage and saves 2.2 Wh (3.64 vs 1.41 Wh left), +17.6% people-seconds per Wh. Forecasting adds
+  nothing (the evacuation is unannounced and people stand still), so this case could not serve as a test of the anticipation
+  rule.
+- **The line-of-sight model is the biggest assumption:** keeping Al-Hourani's statistical LoS and adding 15 dB on blocked rays
+  (which counts the buildings twice) lowers B6 from 0.781 to 0.636, but the NOMA gain stays (+0.13 to +0.14). The flood-band
+  width (150 or 300 m) moves B6 by less than 0.02.
+- **Altitude and the law:** B6 flies at about 290 m, near the top of the 50-300 m range, because from high up the rays clear the
+  roofs. **That is above the 120 m limit commonly set for routine drone flights** [VERIFY: India's Drone Rules 2021; Nepal's
+  rules not checked], so this result needs a re-run with a 120 m ceiling before it could inform a real plan.
+- Sim-to-sim on the real map (one scenario, seed 0): the simulated quadcopter flying B6 scores 0.8145 against 0.816 in the game.
+<!-- src: docs/case_nepal/README.md 7.7 and 7.8; results.md (who is served, sensitivity) -->
+
+Figure 5.17: [Kathmandu, Teku / Kuleshwor reach of the Bagmati: buildings shaded by height, the river, the assumed 200 m flood band, shelter candidates and the reconstructed people of seed 0 (a scenario based on the Sept 2024 floods; not real data; map data (c) OpenStreetMap contributors)](../case_nepal/figures/nepal_map.png)
+
+Figure 5.18: [NOMA vs OMA at equal bandwidth and power: Kathmandu place profile and synthetic `hard` with the same settings (20 scenarios, 95% CI; map data (c) OpenStreetMap contributors)](../case_nepal/figures/nepal_bars.png)
+<!-- src: docs/case_nepal/figures/ -->
+
+Limits of this case: 94% of the building heights are drawn from the 6% that are tagged; no diffraction, trees, terrain or
+indoor users; only 20 crowd draws; the comparison of NOMA gains between the two maps is unpaired (different scenarios); the
+geometric line of sight has not been checked against a measurement in Kathmandu.
+<!-- src: docs/case_nepal/README.md section 8 -->
 
 <!-- pagebreak -->
 
@@ -999,38 +1288,64 @@ The results support a split of the control problem by time scale, which a commun
 | Radio resource allocation (pairing, power per pair) | every second | Closed form and optimisation: adaptive NOMA (Section 5.3) |
 | Placement for the users as they are now | every 10 s | Search: B6 (grid + altitude) is near-optimal for walking crowds (Section 5.7) |
 | Battery strategy (hover or circle) | minutes | A one-line rule: B8 (Section 5.4) |
-| Mission timing when demand jumps between distant sites | minutes | The only place with confirmed room (2 km designs, +0.04 to +0.09); the full AI has not captured it; a hybrid timing AI is in progress (Section 5.8) |
-<!-- src: book 14.2, 7.10-7.13, 8.9 -->
+| Mission timing when demand jumps between distant sites | minutes | The only place with confirmed room (2 km designs); a hand-written departure rule (B6dep) takes most of it, leaving +0.023 to +0.024 for perfect foresight; neither the full AI nor the hybrid timing AI reached the simpler forecasting bar (Section 5.8) |
+| Placement when the radio model is wrong | every 10 s | Measure a few spots, then search (B6meas); the AI did not beat it (Section 5.9) |
+| Where people are | minutes | Phone position reports: about half of the phones, refreshed every 30 s, 50 m GPS error is enough (Section 5.11) |
+<!-- src: book 14.2, 7.10-7.13, 8.9; Sections 5.7-5.11 of this report -->
 
 "Do not learn what you can compute." On still crowds, a search with the AI's own inputs reaches B2's level, so a learner could
 in principle pass G4, but end-to-end RL did not turn the maps into a precise spot. On walking crowds no controller can gain more
-than 0.002 over greedy re-planning. Where room exists (competing sites, 2 km), a forecasting pilot already captures most of it
-and the first learning agents did not. This is the "where it does not help" half of H2, which the hypothesis explicitly asks us
-to report.
+than 0.002 over greedy re-planning. Where room exists (competing sites, 2 km), a forecasting pilot already captures most of it,
+a departure-time rule captures more, and neither the full AI nor the hybrid did as well. Where the textbook channel is wrong, a
+pilot that measures and searches beat the AI that learns from measurements. This is the "where it does not help" half of H2,
+which the hypothesis explicitly asks us to report.
 
-## 6.2 H2 so far
-H2 is **not supported** by the evidence so far: the AI did not match B2 on still crowds (G4), and in G5 round 1 every agent was
-significantly below the bar. The clairvoyant method explains part of this (no room in walking-crowd scenarios) and located the
-regime where room exists. Whether a hybrid agent that only decides when to leave closes the gap there is being tested now
-(Section 5.8, in progress); until then the honest framing is that **physics-based search is the main controller and learning
-helps, if at all, only in specific regimes**.
-<!-- src: book 8.8, 8.9, 7.11-7.13, D-56 -->
+## 6.2 H2: the final verdict
+H2 is **not supported** by our evidence. Four pre-registered tests of learning, four negative results:
+
+| Test | Room for any pilot | Best AI against the bar |
+|---|---|---|
+| G4, still crowds | not measured by a clairvoyant; B2 0.610, B3 0.659 | 0.576 vs pass mark 0.580: not met |
+| G5 round 1, full AI, 2 km competing sites | clairvoyant +0.048* / +0.044* over the bar | -0.076* / -0.073* |
+| Hybrid timing AI, same cells and bar | the same | -0.004 (n.s.) / -0.019* |
+| Model mismatch (exploratory cells) | +0.036* / +0.035* | -0.039* / -0.101* |
+
+The clairvoyant method explains part of this (no room on walking crowds) and located the one regime where room exists; the
+shortfall decomposition (Table 5.13) shows that the AI's learning is not the main problem there, its inputs and its use of
+the announcement are. The anticipation rule that was meant to predict the room without the clairvoyant test was **not
+confirmed** (5 of 8 calls right). The honest framing is therefore that **physics-based search is the main controller; learning,
+with our inputs and budgets, did not help anywhere we tested; and we can measure in advance where it could**.
+<!-- src: book 8.8, 8.9, 7.11-7.13, D-56; hybrid summary.md (clairvoyant room over the bar on val, same 20 scenarios and
+bar as G5 round 1); model_mismatch_results.md, room.md; anticipation results_summary.md -->
+
+*Plain words.* We asked an AI to learn four different jobs, each time with a pass mark written down first. It never beat the
+best hand-written pilot. We report this as a finding, not a failure to hide: the simple pilots are strong because they compute
+with the same physics, and the places where looking ahead pays are few and narrow.
 
 ## 6.3 Limitations
-- **Model limits:** no building heights or terrain; obstacles are 2D rectangles with a fixed 15 dB loss; no backhaul; no
-  interference from other cells; no bit-error rate; the turning-energy term is our own extension; walking speeds, surge
-  behaviour and minimum rates are engineering assumptions; fading is off in the main runs.
-- **Information:** the baselines know every person's true position; in reality survivors' positions are unknown and must be
-  estimated from phone signals. The AI's maps assume a density estimate that a real drone would also have to build.
+- **Model limits:** no terrain; in the synthetic scenarios obstacles are 2D rectangles with a fixed 15 dB loss (only the
+  Kathmandu case has building heights, and there 94% of them are drawn from the tagged 6%); no backhaul; no interference from
+  other cells; no bit-error rate; the turning-energy term is our own extension; walking speeds, surge behaviour and minimum
+  rates are engineering assumptions; fading is off in the main runs; the shadowing and hidden-building values of the mismatch
+  study are engineering assumptions.
+- **Information:** most baselines know every person's true position. The value-of-information study shows that phone reports
+  from about half of the phones would be enough, but it assumes phones report independently of where they are and that the
+  share of reporters is known; locating phones that do *not* report is future work (Section 7.3).
 - **NOMA practicality:** ordinary phones are believed not to support NOMA decoding (to be checked); 10-17% of adaptive NOMA
   pairs give the weak user less than half the power, which practical receivers may not accept (no clamp tested).
 - **Regulation:** our altitude range (50-300 m) is above the 120 m limit that drone rules commonly set for routine flights
-  [PENDING/VERIFY: cite India's Drone Rules 2021 and the DGCA airspace map]; results at the lower altitudes need a re-run.
-- **Statistics:** several experiments use 12-20 scenarios per cell; the sim-to-sim check uses 5.
+  [PENDING/VERIFY: cite India's Drone Rules 2021 and the DGCA airspace map]. The best pilot often uses the top of the range: in
+  the Kathmandu case B6 flies at about 290 m, and in the still-crowd mismatch scenarios it chose the 300 m ceiling in 20 of 20.
+  Results with a 120 m ceiling need a re-run.
+- **Statistics:** several experiments use 12-20 scenarios per cell (the anticipation test 12, the hybrid and mismatch tests 20,
+  the Kathmandu case 20); the sim-to-sim check uses 5.
 - **Quadcopter energy:** the coverage results carry over to the quadcopter model, but its battery numbers are not yet
-  trustworthy (Section 5.9).
+  trustworthy (Section 5.10).
+- **Real place:** the Kathmandu people and flood band are reconstructed, not observed; the flooded localities rest partly on
+  news reports.
 - **Single drone:** H4 was not attempted.
-<!-- src: book 4.10, 11.3, 13.9, 10.2, 7.12, 4.9; 120 m limit NOT IN BOOK (to verify) -->
+<!-- src: book 4.10, 11.3, 13.9, 10.2, 7.12, 4.9; 120 m limit NOT IN BOOK (to verify); docs/case_nepal/README.md 7.7, 8;
+value_of_info.md section 6; model_mismatch.md section 2 -->
 
 ## 6.4 Threats to validity
 - **Internal:** a bug could favour one pilot. Mitigations: one shared `env.step()`, paired comparisons on identical scenarios,
@@ -1039,11 +1354,16 @@ helps, if at all, only in specific regimes**.
   leaving too early).
 - **Construct:** coverage counts users at their minimum rate; it ignores how much more than the minimum they get (we report total
   rate and fairness alongside). The minimum rates are not signed off.
-- **External:** the data are synthetic; absolute coverage numbers do not transfer to a real disaster, only the comparisons and
-  qualitative lessons do. The Al-Hourani parameters are from secondary sources; MATLAB parity (Gate G1) is not done.
-- **Conclusion:** pass marks were written before results (G4, competing sites, G5) and the test seeds are untouched, so the
-  verdicts cannot have been tuned to the outcome.
-<!-- src: book 10.4, 10.5, 14.5, D-43, D-52, D-55, journal 55 -->
+- **External:** the data are synthetic (and in the Kathmandu case the people are reconstructed on a real map); absolute
+  coverage numbers do not transfer to a real disaster, only the comparisons and qualitative lessons do. The Kathmandu case
+  supports this: the pilots rank the same on real geometry as on the synthetic map. The Al-Hourani parameters are from
+  secondary sources; MATLAB parity (Gate G1) is not done.
+- **Conclusion:** pass marks were written before results (G4, competing sites, G5, value of information, anticipation rule,
+  hybrid timing, model mismatch) and the test seeds are untouched, so the verdicts cannot have been tuned to the outcome. Two
+  departures are disclosed where they occur: the model-mismatch training cells were added after the pre-registered grid gave a
+  null (exploratory), and the anticipation rule's candidate set was extended once before the new designs were run.
+<!-- src: book 10.4, 10.5, 14.5, D-43, D-52, D-55, journal 55; model_mismatch.md section 2; anticipation_rule.md section 4
+(disclosure) -->
 
 <!-- pagebreak -->
 
@@ -1057,42 +1377,97 @@ and used it to test four hypotheses fairly.
 
 | Hypothesis | Verdict | Evidence |
 |---|---|---|
-| H1 adaptive beats fixed | **Supported** where area is large and power scarce | `hard`: 0.741 vs 0.428 (Table 5.1); small gap in default scenarios (0.914 vs 0.882) |
-| H2 RL beats heuristics only under dynamics and battery limits | **Not supported so far** (hybrid timing AI in progress) | G4 not met (0.576 < 0.580); G5 round 1 all agents below the bar (best 0.680 vs 0.756); no room on walking crowds (+0.002); room confirmed only on 2 km competing sites |
-| H3 NOMA beats OMA | **Supported**, with an honest trade-off | Adaptive NOMA +0.03 to +0.05 over equally optimised OMA for every pilot; fixed NOMA loses coverage at 30 dBm (232 kbps ceiling) |
+| H1 adaptive beats fixed | **Supported** where area is large and power scarce | `hard`: 0.741 vs 0.428 (Table 5.1); small gap in default scenarios (0.914 vs 0.882); Kathmandu case +0.107 (crowd near the centre, nobody walks) |
+| H2 RL beats heuristics only under dynamics and battery limits | **Not supported** | G4 not met (0.576 < 0.580); G5 round 1 all agents below the bar (best 0.680 vs 0.756); hybrid timing AI -0.004 / -0.019 vs the bar; model mismatch -0.039 / -0.101; no room on walking crowds (+0.002); room confirmed only on 2 km competing sites |
+| H3 NOMA beats OMA | **Supported**, with an honest trade-off | Adaptive NOMA +0.03 to +0.05 over equally optimised OMA for every pilot; +0.127 for B6 on real Kathmandu geometry (twice `hard`); +0.08 to +0.14 for every AI agent (G5, hybrid, mismatch); fixed NOMA loses coverage at 30 dBm (232 kbps ceiling); optimised schemes trade total rate for people served |
 | H4 multi-UAV | **Not attempted** | Stretch goal |
-<!-- src: book 7.5, 7.8, 8.8, 8.9, 7.11, 13.5, 13.9 -->
+<!-- src: book 7.5, 7.8, 8.8, 8.9, 7.11, 13.5, 13.9; docs/case_nepal/results.md; hybrid summary.md; model_mismatch_results.md -->
 
-Further findings: most of a search pilot's lead came from choosing the altitude; circling at the minimum-power speed serves about
-26% more people per battery; the clairvoyant headroom test tells in advance whether a scenario leaves any room for a learning
-controller, and room for it was confirmed on fresh scenarios only where demand jumps between sites 2 km apart; and a
-quadcopter with an autopilot flies our plans within 0.012 coverage of the simplified game.
+Further findings and contributions:
+- **Energy:** circling at the minimum-power speed serves about 26% more people per battery (robust +21% to +31%); most of a
+  search pilot's lead came from choosing the altitude.
+- **Clairvoyant headroom:** a test that tells, before any training, whether a scenario leaves room for a learning controller;
+  room was confirmed on fresh scenarios only where demand jumps between sites about 2 km apart. A shortcut formula for that room
+  (the anticipation rule) was **not confirmed** on 8 new designs.
+- **Value of location information (passed):** a planner keeps 98% of its coverage with position reports from half of the
+  phones on moving crowds and one in twenty on competing sites, with up to 50 m GPS error; reports should be at most 30 s old.
+- **Sim-to-sim:** a quadcopter with an autopilot and wind flies our plans within 0.012 coverage of the simplified game.
+- **Real geometry:** on a scenario based on the 2024 Kathmandu floods, with 12,061 real buildings, the pilots rank as on the
+  synthetic map and NOMA's gain doubles for the best pilot.
+- **The map of where AI helps:** nowhere in our tests did learning beat computed rules; we can say why (inputs, announcement use,
+  altitude, little room) and where it could (only where the clairvoyant test shows room).
 
 ## 7.2 Future work
-1. **Finish what is in progress (expected 24-25 Oct 2026):** the anticipation rule (fitted on 9 designs, tested on 8 new ones
-   with predictions written first), the hybrid timing AI against the pre-registered bar, and the value of location
-   information; then the final evaluation (negative control, one read of the test seeds) and this report.
-2. **Connect-and-locate survivors from attached phones.** A drone base station knows which phones are connected and can estimate
-   where they are from signal strength or timing. Replacing the "true positions" of the baselines and the density maps of the AI
-   with such estimates closes the largest realism gap; the value-of-location-information study (Section 5.10) is the first step,
-   and it is also a possible product (business track).
-3. **Real places:** OpenStreetMap buildings and shelters as obstacles and targets, population density for crowd placement, flood
-   extents and elevation; labelled "a scenario based on ...", never real survivor data, since survivor positions are not
-   published (planned as a demonstration, Section 5.11).
+1. **Final evaluation:** read the untouched test seeds (120-139) once for the main comparisons, with the negative controls;
+   merge the four study branches into `main`.
+2. **Find-and-serve:** locate survivors from their phones' uplink signals and serve them in the same mission (Section 7.3;
+   study in progress).
+3. **Real places, further:** population density for crowd placement, satellite flood extents instead of a fixed band, terrain
+   elevation, a test of the geometric line of sight against a measurement; always labelled "a scenario based on ...", never real
+   survivor data, since survivor positions are not published.
 4. **Tethered drones:** a tether supplies power and backhaul, removing the battery limit and the backhaul gap, at the cost of a
-   fixed ground station and a limited radius; drone cell sites of this kind (for example AT&T's tethered "Flying COW") have been
-   reported in news sources after hurricanes [VERIFY citation].
-5. **Legal altitude limits:** re-run the main comparisons with the ceiling at 120 m above ground and the corresponding permission
-   rules [VERIFY: Drone Rules 2021].
-6. **Disaster events and realism:** rising flood, evacuation, aftershocks, drone failure; wind, GPS error and command delay; a
-   safety layer (geofence, battery reserve, return home, fallback to B6).
-7. **NOMA as a decision of the AI**, need-aware pairing, bit-error rate, and a bench test with software-defined radios.
-8. **Validation:** read the Al-Hourani paper, MATLAB parity, sign-off of the minimum rates and their sensitivity runs, and one
+   fixed ground station and a limited radius; drone cell sites of this kind (for example AT&T's "Flying COW" after Hurricane
+   Maria in 2017 [36]) have been reported in news and operator sources [VERIFY].
+5. **Legal altitude limits:** re-run the main comparisons, and the Kathmandu case where B6 flies at about 290 m, with the ceiling
+   at 120 m above ground and the corresponding permission rules [VERIFY: Drone Rules 2021].
+6. **The AI, if pursued further:** give it the altitude choice and a direct use of the announcement (the two largest parts of
+   its shortfall, Table 5.13), and run the clairvoyant test first on any new scenario family, since the anticipation rule cannot
+   replace it.
+7. **Disaster events and realism:** rising flood, aftershocks, drone failure; wind, GPS error and command delay; a safety layer
+   (geofence, battery reserve, return home, fallback to B6).
+8. **NOMA as a decision of the AI**, need-aware pairing, bit-error rate, and a bench test with software-defined radios.
+9. **Validation:** read the Al-Hourani paper, MATLAB parity, sign-off of the minimum rates and their sensitivity runs, and one
    real measurement of the signal against height.
-9. **Multi-UAV control (H4)** and a flight in ArduPilot SITL over MAVLink.
-10. **Business track:** the most realistic product for a student team is software only, a planning and rehearsal tool for
+10. **Multi-UAV control (H4)** and a flight in ArduPilot SITL over MAVLink.
+11. **Business track:** the most realistic product for a student team is software only, a planning and rehearsal tool for
     emergency teams or telecom operators; the next step is to interview 5-10 practitioners before building more.
 <!-- src: book 11.3, 11.4, 11.5, roadmap stages 2-5, 10.4, CLAUDE.md ideas backlog -->
+
+## 7.3 Future work: finding survivors from their phones (find-and-serve)
+**Status: study in progress; results pending.** Nothing in this section is a result yet.
+
+**The idea in plain words.** After a disaster the drone is the only cell tower in the area, so every working phone nearby tries
+to attach to it and transmits. The strength of a phone's uplink signal at the drone says roughly how far away the phone is:
+not a point, but a noisy ring around the drone. When the drone measures the same phone from several spots, the rings cross,
+like GPS working in reverse, and the phone's position can be estimated. Noise widens the rings: shadowing by buildings
+(correlated over tens of metres, which is why the Gudmundson model [34] is used), extra loss through rubble, and fast fading.
+The drone then has a trade-off: flying to new spots to sharpen the estimates (search) or staying where it serves the most
+people (serve), with NOMA sharing its radio among them. Phones transmit with limited power (a typical handset is power class 3,
+23 dBm [37]), so the uplink, not the downlink, limits how far the drone can hear them. The value-of-information study
+(Section 5.11) already tells how good the estimates must be for planning: about half of the phones, 50 m accuracy, refreshed
+every 30 s.
+
+**Related work [VERIFY all].** SARDO [33] describes a drone carrying a light LTE base station that localises phones for search
+and rescue. LifeSeeker [35] is reported as a commercial drone-borne phone-locating system used by the Spanish Guardia Civil.
+Neither, as far as we know, plans the drone's flight to *serve* the located people with NOMA at the same time; this still has to
+be checked.
+
+*Table 7.2 Path to real deployment*
+
+| Stage | What | Who and what is needed |
+|---|---|---|
+| 1 Simulation | Find-and-serve in this simulator: uplink rings, noise, search vs serve, NOMA | This project (study in progress) |
+| 2 Lab test | A software-defined radio running an open-source LTE stack as the base station, real phones, in a shielded room or under a test licence | A university lab; radio test permission |
+| 3 Field trial | The base station on a drone over a mock disaster site | An operator or a rescue agency as partner; in India likely a WPC test licence for the spectrum and DGCA permission for the drone [to be checked] |
+| 4 Approval and adoption | Use in real responses | Telecom operators, regulators, and agencies such as the NDRF |
+
+**Real-world barriers.**
+- **It is technically an IMSI-catcher:** a base station that makes phones attach. Using licensed spectrum needs a licence and
+  the operator's cooperation; operating one without authorisation is generally restricted [to be checked for India].
+- **Authentication:** a phone only completes the attach when the operator's core network authenticates its SIM. A standalone
+  drone station without that link can only hear attach attempts, which may still be enough to measure signal strength, but
+  not to give service.
+- **Phone battery:** survivors' phones may be switched off or flat if rescue takes long.
+- **Rubble and buildings** attenuate the uplink strongly and bias the distance rings.
+- **The drone:** payload, endurance and airspace permissions limit what can be carried and for how long.
+- **Competing proven tools:** thermal cameras, search dogs and acoustic listening devices are established in rescue work; a new
+  tool must add something they cannot.
+- **Cost and coordination** between operators, regulators and rescue agencies.
+
+**Results.** [PENDING: results of the find-and-serve study, to be inserted when the study is finished and its pre-registered
+checks are run. Do not quote any number from this section until then.]
+<!-- src: task brief of 2026-10-26 (study design by the project lead; another agent builds the study); references [33]-[37]
+all VERIFY -->
 
 <!-- pagebreak -->
 
@@ -1164,3 +1539,19 @@ Journal volume and page details marked "verify" were recalled, not confirmed onl
 [31] J. Kennedy and R. Eberhart, "Particle swarm optimization," in *Proc. IEEE Int. Conf. Neural Networks (ICNN)*, 1995 (verify).
 
 [32] The UAV-NOMA Project Book, `docs/book/` in the project repository (GitHub `vathsa1703/Major_project`), 2026.
+
+[33] A. Albanese, V. Sciancalepore, X. Costa-Perez *et al.*, "SARDO: an automated search-and-rescue drone-based solution for victims localization," IEEE, about 2020-2021 (VERIFY: full author list, title, venue, year, DOI).
+
+[34] M. Gudmundson, "Correlation model for shadow fading in mobile radio systems," *Electronics Letters*, 1991 (VERIFY: volume, issue, pages).
+
+[35] Aerial Tools (Spain), "LifeSeeker" drone-borne phone-locating system; reportedly used by the Guardia Civil (VERIFY: a citable company or news source; not retrieved).
+
+[36] AT&T, "Flying COW" (cell on wings) drone cell site used in Puerto Rico after Hurricane Maria, 2017 (VERIFY: a citable AT&T release or news article; not retrieved).
+
+[37] 3GPP TS 36.101, "Evolved Universal Terrestrial Radio Access (E-UTRA); User Equipment (UE) radio transmission and reception": UE power class 3 = 23 dBm (VERIFY: release and clause).
+
+[38] OpenStreetMap contributors, map data available under the Open Database Licence (ODbL 1.0), https://www.openstreetmap.org/copyright; extract downloaded with the Overpass API on 2026-10-23.
+
+[39] Setopati, news report on flooding in Balkhu and settlements near the Bagmati, 27 Sep. 2024, https://en.setopati.com/social/163750 (as cited in `docs/case_nepal/README.md`; VERIFY).
+
+[40] Nepalnews, "One shower, a flooded city: inside Kathmandu's inundation crisis" (reports UN Park, Thapathali, flooded on 28 Sep. 2024), https://english.nepalnews.com/s/capital/one-shower-a-flooded-city-inside-kathmandus-inundation-crisis/ (as cited in `docs/case_nepal/README.md`; VERIFY title and date).

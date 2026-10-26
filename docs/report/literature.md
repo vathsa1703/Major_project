@@ -49,6 +49,22 @@ Numbering matches the References of `report.md`.
 | 30 | R. Jain, D. Chiu, W. Hawe, "A quantitative measure of fairness and discrimination for resource allocation in shared computer systems", DEC TR-301, 1984 | Jain's fairness index | VERIFY (recalled, not checked online) |
 | 31 | J. Kennedy, R. Eberhart, "Particle swarm optimization", Proc. IEEE ICNN, 1995 | Pilot B4 | VERIFY (recalled, not checked online) |
 
+## Added 2026-10-26 for the find-and-serve study and the Kathmandu case (all VERIFY)
+
+None of these was opened on 2026-10-26; the details below are what the project lead supplied or what we recall. **Do not
+quote any detail beyond the one-line relevance until a team member has checked the original.**
+
+| # | Reference (as far as known) | Why it is cited | What is not known / to check | Status |
+|---|---|---|---|---|
+| 33 | A. Albanese, V. Sciancalepore, X. Costa-Perez et al., "SARDO" (an automated search-and-rescue drone-based solution for victims localisation), IEEE, about 2020-2021 | A drone carrying a light LTE base station that makes phones attach and localises them for search and rescue: the closest published system to find-and-serve (report 2.8, 7.3) | Exact title, full author list, venue (journal or conference), year, DOI; whether it also serves the located users | VERIFY |
+| 34 | M. Gudmundson, "Correlation model for shadow fading in mobile radio systems", Electronics Letters, 1991 | The exponential spatial-correlation model for log-normal shadowing, used for the noisy distance rings in find-and-serve (report 7.3); the mismatch study's correlated shadowing is of the same kind | Volume, issue, pages, DOI | VERIFY |
+| 35 | Aerial Tools (Spain), "LifeSeeker" | A commercial drone-borne system that locates mobile phones for search and rescue, reportedly used by the Spanish Guardia Civil (report 2.8, 7.3) | A citable company page or news article; whether it uses an LTE base station or passive detection; the Guardia Civil use | VERIFY |
+| 36 | AT&T, "Flying COW" (cell on wings), Puerto Rico after Hurricane Maria, 2017 | A tethered drone cell site used to restore coverage after a disaster (report 7.2 item 4, 7.3) | A citable AT&T release or news article; dates; how many users it served | VERIFY |
+| 37 | 3GPP TS 36.101, E-UTRA User Equipment radio transmission and reception | UE power class 3 = 23 dBm maximum output power, the handset uplink power assumed in find-and-serve (report 7.3) | The release and clause to cite; whether NR (TS 38.101-1) should be cited too | VERIFY |
+| 38 | OpenStreetMap contributors, ODbL 1.0, openstreetmap.org/copyright | Building footprints, rivers and shelter candidates of the Kathmandu case; the credit line "(c) OpenStreetMap contributors" is required on every figure and page | Nothing; licence terms to be re-read before publication | Credit given |
+| 39 | Setopati, 27 Sep 2024, https://en.setopati.com/social/163750 | News report of flooding in Balkhu and settlements near the Bagmati (Kathmandu case, report 5.12) | Re-open the page; it is a news source, not a flood map | VERIFY |
+| 40 | Nepalnews, 2024, https://english.nepalnews.com/s/capital/one-shower-a-flooded-city-inside-kathmandus-inundation-crisis/ | News report that UN Park (Thapathali bank) was flooded on 28 Sep 2024 | The article title is inferred from the URL; re-open the page | VERIFY |
+
 ## Found in the book but not in the matrix
 - **HAL hal-04762084** (a NOMA-DQN battery-aware path-planning paper, book 11.2). The HAL page could not be opened on
   2026-10-23 (bot protection), so title, authors and venue are unknown. Not cited until a person retrieves it.
@@ -58,8 +74,10 @@ Numbering matches the References of `report.md`.
 ## Still to find (gaps in the matrix)
 - A source for the regulatory altitude limit (India's Drone Rules 2021 / DGCA airspace map; commonly 120 m above ground for
   routine flights). Needed for Section 6.3 and future work item 5.
-- A citable source (news or operator report) for tethered drone cell sites after disasters (book 11.3 mentions AT&T's "Flying
-  COW" after Hurricane Maria, from 2017-2018 news).
+- A citable source (news or operator report) for tethered drone cell sites after disasters: now listed as [36] (AT&T "Flying
+  COW", Hurricane Maria 2017), but the source itself has not been retrieved.
+- A source on the legal status of a drone base station that makes phones attach (an "IMSI-catcher" in technical terms) in
+  India, and on WPC test licences and DGCA drone permissions (report 7.3, marked "to be checked").
 - A source on NOMA standardisation in LTE ("MUST", Release 14), mentioned in book 11.3 from one survey.
 - A paper that, like this project, compares RL against strong search baselines with paired statistics for UAV base stations
   (to check whether contribution 2 of book 11.2 is really new).
